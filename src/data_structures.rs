@@ -1,6 +1,10 @@
 use std::vec;
 
-use ark_std::{fmt, fmt::Formatter, iterable::Iterable};
+use ark_std::{
+    fmt::{self, Formatter},
+    iterable::Iterable,
+    log2,
+};
 
 use ark_ff::Field;
 use ark_poly::DenseMultilinearExtension;
@@ -241,7 +245,31 @@ impl<F: Field> MatrixPolynomial<F> {
         }
     }
 
-    pub fn tensor_hadamard_product(&self, rhs: &MatrixPolynomial<F>) -> MatrixPolynomial<F> {
+    pub fn flatten(&mut self) {
+        // Take ownership of the first row and replace it with an empty vector
+        let mut flattened_row = std::mem::take(&mut self.evaluation_rows[0]);
+
+        // Concatenate all other rows into the first row
+        for row_index in 1..self.no_of_rows {
+            flattened_row.extend_from_slice(&self.evaluation_rows[row_index]);
+        }
+
+        // Update the dimensions of the original matrix
+        self.no_of_columns *= self.no_of_rows;
+        self.no_of_rows = 1;
+
+        // Replace the first row with the concatenated row
+        self.evaluation_rows[0] = flattened_row;
+    }
+
+    pub fn tensor_hadamard_product<P>(
+        &self,
+        rhs: &MatrixPolynomial<F>,
+        mult_bb: &P,
+    ) -> MatrixPolynomial<F>
+    where
+        P: Fn(&F, &F) -> F,
+    {
         assert_eq!(self.no_of_columns, rhs.no_of_columns);
 
         let mut output = MatrixPolynomial {
@@ -257,11 +285,49 @@ impl<F: Field> MatrixPolynomial<F> {
                 let left_right_hadamard: Vec<F> = left_vec
                     .iter()
                     .zip(right_vec.iter())
-                    .map(|(&l, &r)| l * r)
+                    .map(|(l, r)| mult_bb(l, r))
                     .collect();
                 output.evaluation_rows.push(left_right_hadamard);
             }
         }
+        output
+    }
+
+    pub fn tensor_inner_product<P>(matrices: &Vec<MatrixPolynomial<F>>, mult_bb: &P) -> Vec<F>
+    where
+        P: Fn(&F, &F) -> F,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        let log_row_count = log2(row_count) as usize;
+        let output_bit_len = log_row_count * d;
+        let output_len = 1 << output_bit_len;
+        let mut output = Vec::with_capacity(output_len);
+
+        for i in 0..output_len {
+            let mut local_output = vec![F::ONE; col_count];
+            for j in 0..d {
+                let offset = (d - j - 1) * log_row_count;
+                let index = (i >> offset) & (row_count - 1);
+                let matrix_row = &matrices[j].evaluation_rows[index];
+
+                local_output
+                    .iter_mut()
+                    .zip(matrix_row.iter())
+                    .for_each(|(m_acc, m_curr)| *m_acc = mult_bb(m_acc, &m_curr));
+            }
+            let local_sum = local_output.iter().fold(F::zero(), |sum, val| sum + val);
+            output.push(local_sum);
+        }
+
         output
     }
 
@@ -330,6 +396,7 @@ mod test {
     use ark_bls12_381::Fr as F;
     use ark_ff::{Field, Zero};
     use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
+    use itertools::izip;
     use rand::Rng;
 
     use super::MatrixPolynomial;
@@ -457,6 +524,19 @@ mod test {
         assert_eq!(matrix_poly.evaluation_rows[3], poly.evaluations[6..8]);
     }
 
+    #[test]
+    fn test_matrix_polynomial_flatten() {
+        let mut rng = rand::thread_rng();
+        let poly = DenseMultilinearExtension::<F>::rand(4, &mut rng);
+        let mut matrix_poly = MatrixPolynomial::from_dense_mle(&poly);
+
+        // Test if flatten works as intended
+        matrix_poly.flatten();
+        assert_eq!(matrix_poly.evaluation_rows[0], poly.evaluations);
+        assert_eq!(matrix_poly.no_of_columns, poly.evaluations.len());
+        assert_eq!(matrix_poly.no_of_rows, 1);
+    }
+
     pub fn vector_hadamard(a: &Vec<F>, b: &Vec<F>) -> Vec<F> {
         assert_eq!(a.len(), b.len());
         a.iter().zip(b.iter()).map(|(ai, bi)| ai * bi).collect()
@@ -469,12 +549,15 @@ mod test {
         let matrix_poly_a = MatrixPolynomial::from_dense_mle(&poly_a);
         let poly_b = DenseMultilinearExtension::<F>::rand(4, &mut rng);
         let mut matrix_poly_b = MatrixPolynomial::from_dense_mle(&poly_b);
+        fn mult_bb(left: &F, right: &F) -> F {
+            left * right
+        }
 
         // Reduce number of columns of b by half
         matrix_poly_b.heighten();
 
         // Perform tensor-hadamard product of a and b
-        let matrix_poly_c = matrix_poly_a.tensor_hadamard_product(&matrix_poly_b);
+        let matrix_poly_c = matrix_poly_a.tensor_hadamard_product(&matrix_poly_b, &mult_bb);
 
         assert_eq!(matrix_poly_b.no_of_columns, matrix_poly_a.no_of_columns);
         assert_eq!(matrix_poly_c.no_of_columns, matrix_poly_a.no_of_columns);
@@ -495,6 +578,119 @@ mod test {
             let offset = matrix_poly_b.no_of_rows;
             assert_eq!(matrix_poly_c.evaluation_rows[i], a0_bi);
             assert_eq!(matrix_poly_c.evaluation_rows[i + offset], a1_bi);
+        }
+    }
+
+    #[test]
+    fn test_matrix_polynomial_tensor_inner_product() {
+        let num_variables = 3;
+        let num_evaluations = (1 as u32) << num_variables;
+        let evaluations_a: Vec<F> = (0..num_evaluations).map(|i| F::from(2 * i)).collect();
+        let evaluations_b: Vec<F> = (0..num_evaluations).map(|i| F::from(i + 1)).collect();
+        let evaluations_c: Vec<F> = (0..num_evaluations).map(|i| F::from(3 * i + 2)).collect();
+        fn mult_bb(left: &F, right: &F) -> F {
+            left * right
+        }
+
+        let poly_a =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_a);
+        let poly_b =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_b);
+        let poly_c =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_c);
+        let mut matrix_poly_a = MatrixPolynomial::from_dense_mle(&poly_a);
+        let mut matrix_poly_b = MatrixPolynomial::from_dense_mle(&poly_b);
+        let mut matrix_poly_c = MatrixPolynomial::from_dense_mle(&poly_c);
+
+        // First flatten all matrix polynomials
+        matrix_poly_a.flatten();
+        matrix_poly_b.flatten();
+        matrix_poly_c.flatten();
+
+        let output_1 = MatrixPolynomial::tensor_inner_product(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+
+        let mut expected = F::zero();
+        for (a, b, c) in izip!(
+            &poly_a.evaluations,
+            &poly_b.evaluations,
+            &poly_c.evaluations
+        ) {
+            expected += a * b * c;
+        }
+        assert_eq!(output_1.len(), 1);
+        assert_eq!(expected, output_1[0]);
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+
+        let output_2 = MatrixPolynomial::tensor_inner_product(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_2.len(), 8);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        for i in 0..num_rows {
+            for j in 0..num_rows {
+                for k in 0..num_rows {
+                    let mut expected = F::zero();
+                    for (a, b, c) in izip!(
+                        &matrix_poly_a.evaluation_rows[i as usize],
+                        &matrix_poly_b.evaluation_rows[j as usize],
+                        &matrix_poly_c.evaluation_rows[k as usize]
+                    ) {
+                        expected += a * b * c;
+                    }
+                    let index = k + j * num_rows + i * num_rows * num_rows;
+                    assert_eq!(expected, output_2[index as usize]);
+                }
+            }
+        }
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+
+        let output_3 = MatrixPolynomial::tensor_inner_product(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_3.len(), 64);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        for i in 0..num_rows {
+            for j in 0..num_rows {
+                for k in 0..num_rows {
+                    let mut expected = F::zero();
+                    for (a, b, c) in izip!(
+                        &matrix_poly_a.evaluation_rows[i as usize],
+                        &matrix_poly_b.evaluation_rows[j as usize],
+                        &matrix_poly_c.evaluation_rows[k as usize]
+                    ) {
+                        expected += a * b * c;
+                    }
+                    let index = k + j * num_rows + i * num_rows * num_rows;
+                    assert_eq!(expected, output_3[index as usize]);
+                }
+            }
         }
     }
 

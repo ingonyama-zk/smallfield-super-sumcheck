@@ -350,16 +350,81 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             assert_eq!(challenge_matrix_polynomial.no_of_columns, 1);
 
             // Update challenge matrix with new challenge
+            // ATTENTION: multiplication of extension field elements (ee)
             let challenge_tuple =
                 DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
-            challenge_matrix_polynomial =
-                challenge_matrix_polynomial.tensor_hadamard_product(&challenge_tuple_matrix);
+            challenge_matrix_polynomial = challenge_matrix_polynomial
+                .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             // Heighten the witness polynomial matrices
             for j in 0..prover_state.max_multiplicands {
                 matrix_polynomials[j].heighten();
             }
+        }
+    }
+
+    // TODO: Finish this
+    pub fn prove_with_precomputation_agorithm<G, BE, AEE, EE, BB>(
+        prover_state: &mut ProverState<EF, BF>,
+        transcript: &mut Transcript,
+        round_polynomials: &mut Vec<Vec<EF>>,
+        mult_be: &BE,
+        add_ee: &AEE,
+        mult_ee: &EE,
+        mult_bb: &BB,
+    ) where
+        G: CurveGroup<ScalarField = EF>,
+        BE: Fn(&BF, &EF) -> EF + Sync,
+        AEE: Fn(&EF, &EF) -> EF + Sync,
+        EE: Fn(&EF, &EF) -> EF + Sync,
+        BB: Fn(&BF, &BF) -> BF + Sync,
+    {
+        // Create and fill witness matrix polynomials.
+        // We need to represent state polynomials in matrix form for this algorithm because:
+        // Round 1:
+        // row 0: [ p(0, x) ]
+        // row 1: [ p(1, x) ]
+        //
+        // Round 2:
+        // row 0: [ p(0, 0, x) ]
+        // row 1: [ p(0, 1, x) ]
+        // row 0: [ p(1, 0, x) ]
+        // row 1: [ p(1, 1, x) ]
+        //
+        // and so on.
+        let r_degree = prover_state.max_multiplicands;
+        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
+
+        for i in 0..r_degree {
+            matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
+                &prover_state.state_polynomials[i],
+            ));
+        }
+
+        // Declare the arrays to store pre-computed bb mults
+        // First initialise with the witness polynomials (p2, p3, ..., pd)
+        let mut precompute_arrays: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree - 1);
+        for i in 1..r_degree {
+            // C[i - 1] = p_i(x)
+            precompute_arrays.push(matrix_polynomials[i].clone());
+            precompute_arrays[i - 1].flatten();
+        }
+
+        // Multiply them to get:
+        // c1 = (p2 • p1)
+        // c2 = (p3 • c1) = (p3 • p2 • p1)
+        // ...
+        // ci = (p{i+1} • c{i-1}) = (p{i+1} • pi • ... • p1)
+        // ...
+        //
+        let mut array_to_be_multiplied = matrix_polynomials[0].clone();
+        array_to_be_multiplied.flatten();
+        for i in 1..r_degree {
+            precompute_arrays[i - 1] =
+                precompute_arrays[i - 1].tensor_hadamard_product(&array_to_be_multiplied, &mult_bb);
+
+            array_to_be_multiplied = precompute_arrays[i - 1].clone();
         }
     }
 
@@ -370,7 +435,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// We implement four algorithms to compute the sumcheck proof according to the algorithms in the small-field
     /// sumcheck paper by Justin Thaler: https://people.cs.georgetown.edu/jthaler/small-sumcheck.pdf
     ///
-    pub fn prove<G, EC, BC, T, BE, AEE, EE>(
+    pub fn prove<G, EC, BC, T, BE, AEE, EE, BB>(
         prover_state: &mut ProverState<EF, BF>,
         ef_combine_function: &EC, // TODO: Using two combines is bad, templatize it?
         bf_combine_function: &BC,
@@ -379,6 +444,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_be: &BE,
         add_ee: &AEE,
         mult_ee: &EE,
+        mult_bb: &BB,
     ) -> SumcheckProof<EF>
     where
         G: CurveGroup<ScalarField = EF>,
@@ -388,6 +454,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BE: Fn(&BF, &EF) -> EF + Sync,
         AEE: Fn(&EF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
+        BB: Fn(&BF, &BF) -> BF + Sync,
     {
         // Initiate the transcript with the protocol name
         <Transcript as TranscriptProtocol<G>>::sumcheck_proof_domain_sep(
@@ -437,14 +504,18 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// Proves the sumcheck relation for product of MLE polynomials using the witness-challenge
     /// separation algorithm (Algorithm 2 that uses pre-computations).
     ///
-    pub fn prove_product<G, P>(
+    pub fn prove_product<G, BE, EE, BB>(
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
-        mult_be: &P,
+        mult_be: &BE,
+        mult_ee: &EE,
+        mult_bb: &BB,
     ) -> SumcheckProof<EF>
     where
         G: CurveGroup<ScalarField = EF>,
-        P: Fn(&BF, &EF) -> EF + Sync,
+        BE: Fn(&BF, &EF) -> EF + Sync,
+        EE: Fn(&EF, &EF) -> EF + Sync,
+        BB: Fn(&BF, &BF) -> BF + Sync,
     {
         // Initiate the transcript with the protocol name
         <Transcript as TranscriptProtocol<G>>::sumcheck_proof_domain_sep(
@@ -481,8 +552,8 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             // Compute R = [P(1) ⊛ P(2) ⊛ ... ⊛ P(m)]
             let mut round_matrix_polynomial = matrix_polynomials[0].clone();
             for j in 1..prover_state.max_multiplicands {
-                round_matrix_polynomial =
-                    round_matrix_polynomial.tensor_hadamard_product(&matrix_polynomials[j]);
+                round_matrix_polynomial = round_matrix_polynomial
+                    .tensor_hadamard_product(&matrix_polynomials[j], &mult_bb);
             }
 
             // Collapse R
@@ -497,12 +568,12 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
                 // Compute Γ = (Γ_i ⊛ Γ_i ⊛ ... ⊛ Γ_i)
                 // where Γ_i = (Γ_challenges ⊛ Γ_scalar)
-                let gamma_i_matrix =
-                    challenge_matrix_polynomial.tensor_hadamard_product(&scalar_tuple_matrix);
+                let gamma_i_matrix = challenge_matrix_polynomial
+                    .tensor_hadamard_product(&scalar_tuple_matrix, &mult_ee);
                 let mut gamma_matrix = gamma_i_matrix.clone();
 
                 for _ in 1..prover_state.max_multiplicands {
-                    gamma_matrix = gamma_matrix.tensor_hadamard_product(&gamma_i_matrix);
+                    gamma_matrix = gamma_matrix.tensor_hadamard_product(&gamma_i_matrix, &mult_ee);
                 }
 
                 // Ensure Γ has only 1 column
@@ -533,8 +604,8 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let challenge_tuple =
                 DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
-            challenge_matrix_polynomial =
-                challenge_matrix_polynomial.tensor_hadamard_product(&challenge_tuple_matrix);
+            challenge_matrix_polynomial = challenge_matrix_polynomial
+                .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             // Heighten the witness polynomial matrices
             for j in 0..prover_state.max_multiplicands {

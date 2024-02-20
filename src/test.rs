@@ -45,6 +45,11 @@ mod integration_tests {
             ee_element1 * ee_element2
         }
 
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
         // Take a simple polynomial
         let num_variables = 3;
         let num_evaluations = (1 as u32) << num_variables;
@@ -58,7 +63,7 @@ mod integration_tests {
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -67,6 +72,7 @@ mod integration_tests {
             &mult_be,
             &add_ee,
             &mult_ee,
+            &mult_bb,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
@@ -103,6 +109,11 @@ mod integration_tests {
             ee_element1 * ee_element2
         }
 
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
         // Take two simple polynomial
         let num_variables = 3;
         let num_evaluations = (1 as u32) << num_variables;
@@ -124,7 +135,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -133,15 +144,18 @@ mod integration_tests {
             &mult_be,
             &add_ee,
             &mult_ee,
+            &mult_bb,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _, _, _>(
             &mut prover_state_dup,
             &mut prover_transcript_dup,
             &mult_be,
+            &mult_ee,
+            &mult_bb,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
@@ -186,6 +200,11 @@ mod integration_tests {
             ee_element1 * ee_element2
         }
 
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
         // Take two simple polynomial
         let num_variables = 3;
         let num_evaluations = (1 as u32) << num_variables;
@@ -210,7 +229,7 @@ mod integration_tests {
             AlgorithmType::WitnessChallengeSeparation,
         );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -219,15 +238,18 @@ mod integration_tests {
             &mult_be,
             &add_ee,
             &mult_ee,
+            &mult_bb,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _, _, _>(
             &mut prover_state_dup,
             &mut prover_transcript_dup,
             &mult_be,
+            &mult_ee,
+            &mult_bb,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
@@ -272,6 +294,11 @@ mod integration_tests {
             ee_element1 * ee_element2
         }
 
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
         // Take four simple polynomial
         let mut rng = test_rng();
         const NV: usize = 10;
@@ -298,7 +325,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, 3, AlgorithmType::Naive);
         let mut prover_transcript = Transcript::new(b"test_r1cs_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -307,6 +334,7 @@ mod integration_tests {
             &mult_be,
             &add_ee,
             &mult_ee,
+            &mult_bb,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_r1cs_sumcheck");
