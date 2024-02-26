@@ -267,6 +267,105 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_product_sumcheck_with_algorithm_3() {
+        // Define the combine function
+        fn combine_fn(data: &Vec<F>) -> F {
+            assert!(data.len() == 3);
+            data[0] * data[1] * data[2]
+        }
+
+        // Convert a base field element to an extension field element
+        fn to_ef(base_field_element: &BF) -> EF {
+            *base_field_element
+        }
+
+        // Multiplies a base field element to an extension field element
+        fn mult_be(extension_field_element: &EF, base_field_element: &BF) -> EF {
+            extension_field_element * base_field_element
+        }
+
+        // Adds two extension field elements
+        fn add_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 + ee_element2
+        }
+
+        // Multiplies an extension field element to an extension field element
+        fn mult_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 * ee_element2
+        }
+
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
+        // Take two simple polynomial
+        let num_variables = 3;
+        let num_evaluations = (1 as u32) << num_variables;
+        let evaluations_a: Vec<F> = (0..num_evaluations).map(|i| F::from((2 * i) % 7)).collect();
+        let evaluations_b: Vec<F> = (0..num_evaluations).map(|i| F::from((i + 1) % 7)).collect();
+        let evaluations_c: Vec<F> = (0..num_evaluations).map(|i| F::from((i + 2) % 7)).collect();
+        let claimed_sum = (0..num_evaluations)
+            .map(|i| F::from((2 * i) % 7) * F::from((i + 1) % 7) * F::from((i + 2) % 7))
+            .fold(F::zero(), |acc, val| acc + val);
+
+        let poly_a =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_a);
+        let poly_b =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_b);
+        let poly_c =
+            DenseMultilinearExtension::<F>::from_evaluations_vec(num_variables, evaluations_c);
+
+        let polynomials: Vec<LinearLagrangeList<F>> = vec![
+            LinearLagrangeList::<F>::from(&poly_a),
+            LinearLagrangeList::<F>::from(&poly_b),
+            LinearLagrangeList::<F>::from(&poly_c),
+        ];
+        let mut prover_state: ProverState<EF, BF> =
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Precomputation);
+        let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+            &mut prover_state,
+            &combine_fn,
+            &combine_fn,
+            &mut prover_transcript,
+            &to_ef,
+            &mult_be,
+            &add_ee,
+            &mult_ee,
+            &mult_bb,
+        );
+
+        let mut prover_state_dup: ProverState<EF, BF> =
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
+        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+            &mut prover_state_dup,
+            &combine_fn,
+            &combine_fn,
+            &mut prover_transcript_dup,
+            &to_ef,
+            &mult_be,
+            &add_ee,
+            &mult_ee,
+            &mult_bb,
+        );
+
+        let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
+        let result =
+            IPForMLSumcheck::<EF, BF>::verify::<G>(claimed_sum, &proof, &mut verifier_transcript);
+        assert_eq!(result.unwrap(), true);
+
+        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+            claimed_sum,
+            &proof_dup,
+            &mut verifier_transcript_dup,
+        );
+        assert_eq!(result_dup.unwrap(), true);
+    }
+
+    #[test]
     fn test_r1cs_sumcheck() {
         // Define the combine function for r1cs: (a * b * e) - (c * e) = 0
         fn combine_fn(data: &Vec<F>) -> F {

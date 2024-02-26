@@ -9,6 +9,76 @@ use ark_std::{
 use ark_ff::Field;
 use ark_poly::DenseMultilinearExtension;
 
+pub fn bit_decompose(input: usize, input_bit_len: usize, slice_len: usize) -> Vec<usize> {
+    let max_input = (1 as usize) << input_bit_len;
+    assert!(input < max_input);
+    assert!(slice_len <= input_bit_len);
+    assert!(slice_len != 0);
+    assert!(input_bit_len % slice_len == 0);
+
+    let output_bit_mask = ((1 as usize) << slice_len) - 1;
+    let output_len = input_bit_len / slice_len;
+    let mut output = Vec::with_capacity(output_len);
+
+    for i in 0..output_len {
+        let offset = (output_len - i - 1) * slice_len;
+        let output_val = (input >> offset) & output_bit_mask;
+        output.push(output_val);
+    }
+    output
+}
+
+pub fn bit_extend(
+    input: usize,
+    input_bit_len: usize,
+    source_slice_len: usize,
+    target_slice_len: usize,
+) -> usize {
+    let input_bits = bit_decompose(input, input_bit_len, source_slice_len);
+    let mut output: usize = 0;
+    let mut offset = target_slice_len - source_slice_len;
+    for i in 0..input_bits.len() {
+        output += input_bits[input_bits.len() - i - 1] << offset;
+        offset += target_slice_len;
+    }
+    output
+}
+
+pub fn bit_extend_and_insert(
+    input: usize,
+    input_bit_len: usize,
+    value_to_insert: usize,
+    value_to_insert_bit_len: usize,
+    source_slice_len: usize,
+    target_slice_len: usize,
+) -> usize {
+    assert!(target_slice_len > source_slice_len);
+
+    let value_to_insert_bits = bit_decompose(
+        value_to_insert,
+        value_to_insert_bit_len,
+        target_slice_len - source_slice_len,
+    );
+
+    let mut input_bits: Vec<usize> = vec![0; value_to_insert_bits.len()];
+    if source_slice_len != 0 {
+        input_bits = bit_decompose(input, input_bit_len, source_slice_len);
+    }
+    assert_eq!(input_bits.len(), value_to_insert_bits.len());
+    let mut output: usize = 0;
+    let mut insertion_output: usize = 0;
+    let mut offset: usize = target_slice_len - source_slice_len;
+    let mut insertion_offset: usize = 0;
+    for i in 0..input_bits.len() {
+        let idx = input_bits.len() - i - 1;
+        output += input_bits[idx] << offset;
+        offset += target_slice_len;
+        insertion_output += value_to_insert_bits[idx] << insertion_offset;
+        insertion_offset += target_slice_len;
+    }
+    output + insertion_output
+}
+
 /// Represents a pair of values (p(0), p(1)) where p(.) is a linear univariate polynomial of the form:
 /// p(X) = p(0).(1 - X) + p(1).X
 /// where X is any field element. So we have:
@@ -77,6 +147,17 @@ impl<F: Field> LinearLagrangeList<F> {
                     &polynomial.evaluations[i + list_size],
                 )
             })
+            .collect::<Vec<LinearLagrange<F>>>();
+        LinearLagrangeList {
+            size: list_size,
+            list: poly_list,
+        }
+    }
+
+    pub fn from_vector(list: &Vec<F>) -> LinearLagrangeList<F> {
+        let list_size = list.len() / 2;
+        let poly_list = (0..list_size)
+            .map(|i| LinearLagrange::new(&list[i], &list[i + list_size]))
             .collect::<Vec<LinearLagrange<F>>>();
         LinearLagrangeList {
             size: list_size,
@@ -370,6 +451,33 @@ impl<F: Field> MatrixPolynomial<F> {
                     })
             })
     }
+
+    pub fn scale_and_squash<OtherF, P>(
+        self: &MatrixPolynomial<F>,
+        multiplicand: &MatrixPolynomial<OtherF>,
+        mult_be: &P,
+    ) -> LinearLagrangeList<OtherF>
+    where
+        OtherF: Field,
+        P: Fn(&F, &OtherF) -> OtherF + Sync,
+    {
+        assert_eq!(self.no_of_rows, multiplicand.no_of_rows);
+        assert_eq!(multiplicand.no_of_columns, 1);
+
+        // ATTENTION: We are not counting ee additions here!
+        let scaled_vec: Vec<OtherF> = (0..self.no_of_columns)
+            .map(|col_index| {
+                self.evaluation_rows
+                    .iter()
+                    .zip(multiplicand.evaluation_rows.iter())
+                    .fold(OtherF::zero(), |acc, (b_row, e_row)| {
+                        acc + mult_be(&b_row[col_index], &e_row[0])
+                    })
+            })
+            .collect();
+
+        LinearLagrangeList::<OtherF>::from_vector(&scaled_vec)
+    }
 }
 
 impl<F: Field> fmt::Debug for MatrixPolynomial<F> {
@@ -392,14 +500,16 @@ impl<F: Field> fmt::Debug for MatrixPolynomial<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::data_structures::{LinearLagrange, LinearLagrangeList};
+    use crate::data_structures::{
+        bit_extend, bit_extend_and_insert, LinearLagrange, LinearLagrangeList,
+    };
     use ark_bls12_381::Fr as F;
     use ark_ff::{Field, Zero};
     use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
     use itertools::izip;
     use rand::Rng;
 
-    use super::MatrixPolynomial;
+    use super::{bit_decompose, MatrixPolynomial};
 
     pub fn random_field_element<F: Field>() -> F {
         let mut rng = rand::thread_rng();
@@ -409,6 +519,39 @@ mod test {
 
     pub fn get_random_linear_lagrange<F: Field>() -> LinearLagrange<F> {
         LinearLagrange::new(&random_field_element(), &random_field_element())
+    }
+
+    #[test]
+    fn test_bit_decompose() {
+        // (001)(010)(111)(110)(001)
+        let value: usize = 5617;
+        let bits = bit_decompose(value, 15, 3);
+        assert_eq!(bits.len(), 5);
+        assert_eq!(bits[0], 1);
+        assert_eq!(bits[1], 2);
+        assert_eq!(bits[2], 7);
+        assert_eq!(bits[3], 6);
+        assert_eq!(bits[4], 1);
+    }
+
+    #[test]
+    fn test_bit_extend() {
+        // 5617  =>  (001)(010)(111)(110)(001)
+        let value: usize = 5617;
+        // 4363923472  =>  (001[0000])(010[0000])(111[0000])(110[0000])(001[0000])
+        let output = bit_extend(value, 15, 3, 7);
+        assert_eq!(output, 4363923472);
+    }
+
+    #[test]
+    fn test_bit_extend_and_insert() {
+        // 5617  =>  (001)(010)(111)(110)(001)
+        let value: usize = 5617;
+        // 316679 => (0100)(1101)(0101)(0000)(0111)
+        let value_to_insert = 316679;
+        // 5465010199  =>  (001[0100])(010[1101])(111[0101])(110[0000])(001[0111])
+        let output = bit_extend_and_insert(value, 15, value_to_insert, 20, 3, 7);
+        assert_eq!(output, 5465010199);
     }
 
     #[test]
@@ -752,5 +895,44 @@ mod test {
             .zip(poly_b.iter())
             .fold(F::zero(), |acc, (a, b)| acc + a * b);
         assert_eq!(computed, expected);
+    }
+
+    #[test]
+    fn test_matrix_polynomial_scale_and_squash() {
+        let mut rng = rand::thread_rng();
+        let poly_a = DenseMultilinearExtension::<F>::rand(5, &mut rng);
+        let mut matrix_poly_a = MatrixPolynomial::from_dense_mle(&poly_a);
+        fn mult_be(left: &F, right: &F) -> F {
+            left * right
+        }
+
+        // Heighten a
+        matrix_poly_a.heighten(); // no of rows = 4
+        matrix_poly_a.heighten(); // no of rows = 8
+
+        // Create a challenge array with 4 rows, 1 column
+        let poly_b = DenseMultilinearExtension::<F>::rand(3, &mut rng);
+        let mut matrix_poly_b = MatrixPolynomial::from_dense_mle(&poly_b);
+        matrix_poly_b.heighten(); // no of rows = 4
+        matrix_poly_b.heighten(); // no of rows = 8
+        assert_eq!(matrix_poly_b.no_of_columns, 1);
+
+        // Test scale_by operation
+        let computed = matrix_poly_a.scale_and_squash(&matrix_poly_b, &mult_be);
+
+        // Manually scale to compare the result
+        let col_size = matrix_poly_a.no_of_columns;
+        let mut expected: Vec<F> = Vec::with_capacity(col_size);
+        for j in 0..col_size {
+            let chunk_j: Vec<_> = poly_a.iter().skip(j).step_by(col_size).cloned().collect();
+            let expected_j = chunk_j
+                .iter()
+                .zip(poly_b.evaluations.iter())
+                .fold(F::zero(), |acc, (a_val, b_val)| {
+                    acc + mult_be(&a_val, &b_val)
+                });
+            expected.push(expected_j);
+        }
+        assert_eq!(computed, LinearLagrangeList::<F>::from_vector(&expected));
     }
 }
