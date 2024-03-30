@@ -20,6 +20,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         claimed_sum: EF,
         proof: &SumcheckProof<EF>,
         transcript: &mut Transcript,
+        multiplicand: Option<EF>,
     ) -> Result<bool, &'static str>
     where
         G: CurveGroup<ScalarField = EF>,
@@ -50,7 +51,15 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let computed_sum = round_poly_evaluation_at_0 + round_poly_evaluation_at_1;
 
             // Check r_{i}(α_i) == r_{i+1}(0) + r_{i+1}(1)
-            if computed_sum != expected_sum {
+            let modified_expected_sum = match multiplicand {
+                Some(m) => m * expected_sum,
+                None => expected_sum,
+            };
+            if computed_sum != modified_expected_sum {
+                println!("round = {}", round_index);
+                println!("exp = {}", expected_sum);
+                println!("mod_exp = {}", modified_expected_sum);
+                println!("com = {}", computed_sum);
                 return Err("Prover message is not consistent with the claim.".into());
             }
 

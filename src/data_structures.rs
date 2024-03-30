@@ -9,6 +9,21 @@ use ark_std::{
 use ark_ff::Field;
 use ark_poly::DenseMultilinearExtension;
 
+/// Computes n!
+fn factorial(n: u64) -> u64 {
+    (1..=n).product()
+}
+
+/// Computes ⁿCᵣ := n! / (r! * (n - r)!)
+fn count_combinations(n: u64, r: u64) -> u64 {
+    factorial(n) / (factorial(r) * factorial(n - r))
+}
+
+/// Computes [ⁿC₀, ⁿC₁, ..., ⁿCₙ]
+fn get_binomial_combinations(n: u64) -> Vec<u64> {
+    (0..n + 1).map(|k| count_combinations(n, k)).collect()
+}
+
 pub fn bit_decompose(input: usize, input_bit_len: usize, slice_len: usize) -> Vec<usize> {
     let max_input = (1 as usize) << input_bit_len;
     assert!(input < max_input);
@@ -279,6 +294,14 @@ impl<F: Field> MatrixPolynomial<F> {
         }
     }
 
+    pub fn ones(given_no_of_rows: usize, given_no_of_columns: usize) -> Self {
+        MatrixPolynomial {
+            no_of_rows: given_no_of_rows,
+            no_of_columns: given_no_of_columns,
+            evaluation_rows: vec![vec![F::ONE; given_no_of_columns]; given_no_of_rows],
+        }
+    }
+
     pub fn from_dense_mle(input_polynomial: &DenseMultilinearExtension<F>) -> Self {
         let n = input_polynomial.evaluations.len();
         let mid_point = n / 2;
@@ -341,6 +364,114 @@ impl<F: Field> MatrixPolynomial<F> {
 
         // Replace the first row with the concatenated row
         self.evaluation_rows[0] = flattened_row;
+    }
+
+    pub fn hadamard_product<P>(&self, rhs: &MatrixPolynomial<F>, mult_bb: &P) -> MatrixPolynomial<F>
+    where
+        P: Fn(&F, &F) -> F,
+    {
+        assert_eq!(self.no_of_columns, rhs.no_of_columns);
+        assert_eq!(self.no_of_rows, rhs.no_of_rows);
+
+        let mut output = MatrixPolynomial {
+            no_of_rows: self.no_of_rows,
+            no_of_columns: self.no_of_columns,
+            evaluation_rows: Vec::with_capacity(self.no_of_rows),
+        };
+
+        for i in 0..self.no_of_rows {
+            let left_vec: &Vec<F> = &self.evaluation_rows[i];
+            let right_vec: &Vec<F> = &rhs.evaluation_rows[i];
+            let left_right_hadamard: Vec<F> = left_vec
+                .iter()
+                .zip(right_vec.iter())
+                .map(|(l, r)| mult_bb(l, r))
+                .collect();
+            output.evaluation_rows.push(left_right_hadamard);
+        }
+        output
+    }
+
+    pub fn compute_merkle_roots(
+        input_polynomial: &MatrixPolynomial<F>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+    ) -> MatrixPolynomial<F> {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        // bitmask: (d + 1)-bit mask
+        let num_maps = mappings.len();
+        let depth = log2(input_polynomial.no_of_rows) as usize;
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut output = MatrixPolynomial {
+            no_of_rows: 1,
+            no_of_columns: input_polynomial.no_of_columns,
+            evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
+        };
+
+        // Outer loop over x
+        for x in 0..input_polynomial.no_of_columns {
+            // Fetch all input polynomial values for a given x: f(*, x)
+            // where * represents p-bit integers: {0, 1, ..., 2^p - 1}.
+            let mut layer_values: Vec<F> = input_polynomial
+                .evaluation_rows
+                .iter()
+                .map(|row| row[x])
+                .collect();
+
+            // Start iterating over merkle tree layers starting with leaf values
+            for layer in 1..=depth {
+                let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
+                let mapping_for_this_layer = &mappings[j_layer];
+
+                let layer_size = (1 as usize) << (depth - layer);
+                for i in 0..layer_size {
+                    let left = layer_values[2 * i];
+                    let right = layer_values[2 * i + 1];
+                    layer_values[i] = mapping_for_this_layer(&left, &right);
+                }
+                layer_values.truncate(layer_size);
+            }
+            output.evaluation_rows[0].push(layer_values[0]);
+        }
+        output
+    }
+
+    pub fn merkle_sums(
+        input: &Vec<F>,
+        num_children: usize,
+        indices_to_combine: &Vec<usize>,
+    ) -> Vec<Vec<F>> {
+        let input_size = input.len();
+        let depth: usize = input_size.ilog(num_children) as usize;
+        assert!(indices_to_combine.len() <= num_children);
+        assert_eq!(input_size, num_children.pow(depth as u32));
+
+        let mut output: Vec<Vec<F>> = Vec::with_capacity(depth + 1);
+        output.push(input.clone());
+
+        let mut layer = input.clone();
+        let mut layer_size = layer.len() / num_children;
+        for _ in 1..=depth {
+            for j in 0..layer_size {
+                let mut layer_value = F::zero();
+                for p in 0..indices_to_combine.len() {
+                    assert!(indices_to_combine[p] < num_children);
+                    let value_to_add = layer[num_children * j + indices_to_combine[p]];
+                    layer_value += value_to_add;
+                }
+                layer[j] = layer_value;
+            }
+            layer.truncate(layer_size);
+            output.push(layer.clone());
+            layer_size /= num_children;
+        }
+        output.reverse();
+        output
     }
 
     pub fn tensor_hadamard_product<P>(
@@ -477,6 +608,68 @@ impl<F: Field> MatrixPolynomial<F> {
             .collect();
 
         LinearLagrangeList::<OtherF>::from_vector(&scaled_vec)
+    }
+
+    pub fn update_with_challenge<P>(
+        &mut self,
+        challenge: F,
+        interpolation_maps: &Vec<Box<dyn Fn(&Vec<F>) -> F>>,
+        mult_fn: &P,
+    ) where
+        P: Fn(&F, &F) -> F,
+    {
+        let rows = self.no_of_rows;
+        let cols = self.no_of_columns;
+        assert_eq!(interpolation_maps.len(), cols);
+
+        // Add a new row: [1, r, r^2, ..., r^{d-1}, r^d]
+        self.evaluation_rows.push(vec![F::from(1 as u32)]);
+        self.no_of_rows += 1;
+        for i in 1..cols {
+            let next_value = mult_fn(&self.evaluation_rows[rows][i - 1], &challenge);
+            self.evaluation_rows[rows].push(next_value);
+        }
+
+        // Update the powers to:
+        // 0:   ř^{d}
+        // 1:   ř^{d-1} * r
+        // 2:   ř^{d-2} * r^2
+        // 3:   ř^{d-3} * r^3
+        // ...
+        // ...
+        // d-1: ř^{1} * r^{d-1}
+        // d:   r^{d}
+        //
+        // using binomial theorem.
+        let mut updated_row: Vec<F> = Vec::with_capacity(cols);
+        for i in 0..cols {
+            let start_idx: usize = cols - i - 1;
+            let end_idx: usize = cols - 1;
+
+            let combinations = get_binomial_combinations(i as u64);
+            assert_eq!(combinations.len(), i + 1);
+
+            let mut result = F::from(0 as u32);
+            for j in start_idx..=end_idx {
+                let current_value = self.evaluation_rows[rows][j];
+                let is_negative = (j - start_idx) & 1 == 1;
+                if is_negative {
+                    result -= current_value * F::from(combinations[j - start_idx]);
+                } else {
+                    result += current_value * F::from(combinations[j - start_idx]);
+                }
+            }
+            updated_row.push(result);
+        }
+        updated_row.reverse();
+
+        // Update the row with interpolation maps
+        let updated_row_clone = updated_row.clone();
+        for i in 0..interpolation_maps.len() {
+            updated_row[i] = interpolation_maps[i](&updated_row_clone);
+        }
+
+        self.evaluation_rows[rows] = updated_row;
     }
 }
 
@@ -725,6 +918,40 @@ mod test {
     }
 
     #[test]
+    fn test_merkle_sums() {
+        let num_children: u64 = 5;
+        let depth: u64 = 2;
+        let num_evaluations: u64 = (num_children as usize).pow(depth as u32) as u64;
+        let evaluations: Vec<F> = (0..num_evaluations)
+            .map(|i: u64| F::from((i / num_children + 2) * (i % num_children + 1)))
+            .collect();
+
+        // Example tree of depth 2:
+        //                                (a1 + a2 + b1 + b2)
+        //
+        //   [(a1 + a2)        (b1 + b2)       (c1 + c2)         (d1 + d2)        (e1 + e2)]
+        //
+        // [a1 a2 a3 a4 a5] [b1 b2 b3 b4 b5] [c1 c2 c3 c4 c5] [d1 d2 d3 d4 d5] [e1 e2 e3 e4 e5]
+        // a(i) = 2i        b(i) = 3i        c(i) = 4i        d(i) = 5i        e(i) = 6i
+        let merkle_sum_output =
+            MatrixPolynomial::merkle_sums(&evaluations, num_children as usize, &vec![0, 1]);
+
+        assert_eq!(merkle_sum_output.len(), depth as usize + 1);
+        assert_eq!(merkle_sum_output[0], vec![F::from(15)]);
+        assert_eq!(
+            merkle_sum_output[1],
+            vec![
+                F::from(6),
+                F::from(9),
+                F::from(12),
+                F::from(15),
+                F::from(18)
+            ]
+        );
+        assert_eq!(merkle_sum_output[2], evaluations);
+    }
+
+    #[test]
     fn test_matrix_polynomial_tensor_inner_product() {
         let num_variables = 3;
         let num_evaluations = (1 as u32) << num_variables;
@@ -934,5 +1161,46 @@ mod test {
             expected.push(expected_j);
         }
         assert_eq!(computed, LinearLagrangeList::<F>::from_vector(&expected));
+    }
+
+    #[test]
+    fn test_update_with_challenge() {
+        fn mult_bb(left: &F, right: &F) -> F {
+            left * right
+        }
+
+        let col_size = 10;
+        let mut sample: MatrixPolynomial<F> = MatrixPolynomial::<F> {
+            no_of_rows: 0,
+            no_of_columns: col_size,
+            evaluation_rows: Vec::with_capacity(1),
+        };
+
+        fn get_projective_imap(index: usize) -> Box<dyn Fn(&Vec<F>) -> F> {
+            Box::new(move |x: &Vec<F>| -> F { x[index].clone() })
+        }
+
+        let interpolation_maps: Vec<Box<dyn Fn(&Vec<F>) -> F>> =
+            (0..col_size).map(|i| get_projective_imap(i)).collect();
+
+        let r: F = random_field_element();
+        sample.update_with_challenge(r, &interpolation_maps, &mult_bb);
+        assert_eq!(sample.no_of_rows, 1);
+        assert_eq!(sample.no_of_columns, col_size);
+
+        let scaling_factor: F = (F::ONE - r) * r.inverse().unwrap();
+        let mut r_pow_d = F::ONE;
+        for _ in 1..col_size {
+            r_pow_d *= r;
+        }
+
+        let mut multiplicand = F::ONE;
+        for i in 0..col_size {
+            assert_eq!(
+                sample.evaluation_rows[0][col_size - i - 1],
+                multiplicand * r_pow_d
+            );
+            multiplicand *= scaling_factor;
+        }
     }
 }
