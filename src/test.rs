@@ -86,6 +86,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
     }
@@ -177,6 +178,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -185,6 +187,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -280,6 +283,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -288,6 +292,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -392,6 +397,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -400,6 +406,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -567,6 +574,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -575,6 +583,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -731,6 +740,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             None,
+            None,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -739,6 +749,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -894,6 +905,7 @@ mod integration_tests {
             &proof,
             &mut verifier_transcript,
             Some(EF::from(2 as u32)),
+            Some(3 as usize),
         );
         assert_eq!(result.unwrap(), true);
 
@@ -902,6 +914,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -1063,12 +1076,14 @@ mod integration_tests {
         //
         // rᵢ₊₁(0) + rᵢ₊₁(1) == △ * rᵢ(αᵢ)
         //
+        let round_t = Some(3 as usize);
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
             Some(EF::from(6 as u32)),
+            round_t,
         );
         assert_eq!(result.unwrap(), true);
 
@@ -1077,6 +1092,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            None,
             None,
         );
         assert_eq!(result_dup.unwrap(), true);
@@ -1162,6 +1178,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            None,
             None,
         );
         assert_eq!(result.unwrap(), true);

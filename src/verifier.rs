@@ -21,6 +21,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         proof: &SumcheckProof<EF>,
         transcript: &mut Transcript,
         multiplicand: Option<EF>,
+        round_t: Option<usize>,
     ) -> Result<bool, &'static str>
     where
         G: CurveGroup<ScalarField = EF>,
@@ -36,6 +37,19 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             proof.degree as u64,
         );
 
+        let multiplicand_inv = match multiplicand {
+            Some(m) => m.inverse().unwrap(),
+            None => EF::ONE,
+        };
+        let mut multiplicand_inv_pow_t = EF::ONE;
+        let unwrapped_round_t = match round_t {
+            Some(t) => t,
+            None => 0,
+        };
+        for _ in 0..unwrapped_round_t {
+            multiplicand_inv_pow_t *= multiplicand_inv;
+        }
+
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
             let round_poly_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
@@ -50,16 +64,42 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let round_poly_evaluation_at_1 = round_poly_evaluations[1];
             let computed_sum = round_poly_evaluation_at_0 + round_poly_evaluation_at_1;
 
-            // Check r_{i}(α_i) == r_{i+1}(0) + r_{i+1}(1)
+            // Check rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
+            //
+            // In case of toom-cook based sumcheck, we would instead check the following:
+            // For i ∈ [1, t):
+            //              rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
+            //   ⇒   △ᶦ⁺¹ * rᵢ(αᵢ) == △ᶦ⁺¹ * (rᵢ₊₁(0) + rᵢ₊₁(1))
+            //   ⇒     △ * r'ᵢ(αᵢ) == r'ᵢ₊₁(0) + r'ᵢ₊₁(1)
+            //
+            // where r'ᵢ(.) and r'ᵢ₊₁(.) are the round polynomials sent by the prover.
+            // For i = t:
+            //               rₜ(αₜ) == rₜ₊₁(0) + rₜ₊₁(1)
+            //
+            // But since round t polynomial actually sent is r'ₜ(.) = △ᵗ * rₜ(.), we only have access
+            // to r'ₜ(αₜ) = △ᵗ * rₜ(αₜ). Also, the round polynomials after round t are sent as simply:
+            // rₜ₊₁(.), rₜ₊₂(.), ..., rₙ(.). Thus, we need to modify the verification equality as:
+            //        △⁻ᵗ * r'ₜ(αₜ) == rₜ₊₁(0) + rₜ₊₁(1)
+            //
+            // For i > t, we don't need to change anything to the verification equation.
+            //
             let modified_expected_sum = match multiplicand {
-                Some(m) => m * expected_sum,
+                Some(m) => {
+                    assert!(round_t.is_some());
+                    if (round_index + 1) <= unwrapped_round_t {
+                        // Rounds [1, t]
+                        m * expected_sum
+                    } else if (round_index + 1) == (unwrapped_round_t + 1) {
+                        // Round (t + 1)
+                        multiplicand_inv_pow_t * expected_sum
+                    } else {
+                        // Rounds (t + 1, n]
+                        expected_sum
+                    }
+                }
                 None => expected_sum,
             };
             if computed_sum != modified_expected_sum {
-                println!("round = {}", round_index);
-                println!("exp = {}", expected_sum);
-                println!("mod_exp = {}", modified_expected_sum);
-                println!("com = {}", computed_sum);
                 return Err("Prover message is not consistent with the claim.".into());
             }
 

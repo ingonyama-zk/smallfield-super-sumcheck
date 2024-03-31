@@ -770,7 +770,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
         // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
         // for each witness polynomial p_i.
-        // ATTENTION: This doesn't work in the case without inversions, investigate!
         let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
             .iter()
             .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
