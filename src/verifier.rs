@@ -1,10 +1,11 @@
-use ark_ec::CurveGroup;
-use ark_ff::{batch_inversion_and_mul, PrimeField};
+use ark_ff::{batch_inversion_and_mul, Field, PrimeField};
 use merlin::Transcript;
 
-use crate::{prover::SumcheckProof, transcript::TranscriptProtocol, IPForMLSumcheck};
+use crate::{
+    extension_transcript::ExtensionTranscriptProtocol, prover::SumcheckProof, IPForMLSumcheck,
+};
 
-impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     ///
     /// Verify a sumcheck proof by checking for correctness of each round polynomial.
     /// Additionally, checks the evaluation of the original MLE polynomial (via oracle access)
@@ -16,22 +17,19 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// We could give the verifier an oracle access to the MLE polynomial `f` but we defer this to the commitment
     /// scheme implementation in a future release.
     ///
-    pub fn verify<G>(
+    pub fn verify(
         claimed_sum: EF,
         proof: &SumcheckProof<EF>,
         transcript: &mut Transcript,
         multiplicand: Option<EF>,
         round_t: Option<usize>,
-    ) -> Result<bool, &'static str>
-    where
-        G: CurveGroup<ScalarField = EF>,
-    {
+    ) -> Result<bool, &'static str> {
         if proof.num_vars == 0 {
             return Err("Invalid proof.");
         }
 
         // Initiate the transcript with the protocol name
-        <Transcript as TranscriptProtocol<G>>::sumcheck_proof_domain_sep(
+        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             proof.num_vars as u64,
             proof.degree as u64,
@@ -104,14 +102,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the prover's message to the transcript
-            <Transcript as TranscriptProtocol<G>>::append_scalars(
+            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &proof.round_polynomials[round_index],
             );
 
             // derive the verifier's challenge for the next round
-            let alpha = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -130,7 +128,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 /// We can trivially extend this for `num_points` > 20 but in practical use cases, `num_points` would not exceed 8 or 10.
 /// Reference: Equation (3.3) from https://people.maths.ox.ac.uk/trefethen/barycentric.pdf
 ///
-pub(crate) fn barycentric_interpolation<F: PrimeField>(evaluations: &[F], x: F) -> F {
+pub(crate) fn barycentric_interpolation<F: Field>(evaluations: &[F], x: F) -> F {
     let num_points = evaluations.len();
     let mut lagrange_coefficients: Vec<F> =
         (0..num_points).map(|j| x - F::from(j as u64)).collect();

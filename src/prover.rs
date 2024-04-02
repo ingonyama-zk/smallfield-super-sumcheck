@@ -1,9 +1,8 @@
 use crate::{
     data_structures::{bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial},
-    transcript::TranscriptProtocol,
+    extension_transcript::ExtensionTranscriptProtocol,
     IPForMLSumcheck,
 };
-use ark_ec::CurveGroup;
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use ark_std::{log2, vec::Vec};
@@ -13,7 +12,7 @@ use merlin::Transcript;
 use rayon::prelude::*;
 
 // A sumcheck proof contains all round polynomials
-pub struct SumcheckProof<EF: PrimeField> {
+pub struct SumcheckProof<EF: Field> {
     pub(crate) num_vars: usize,
     pub(crate) degree: usize,
     pub(crate) round_polynomials: Vec<Vec<EF>>,
@@ -31,7 +30,7 @@ pub enum AlgorithmType {
 /// bb = base-field element multiplied to a base-field element
 /// be = base-field element multiplied to an extension-field element
 /// ee = extension-field element multiplied to an extension-field element
-pub struct ProverState<EF: PrimeField, BF: PrimeField> {
+pub struct ProverState<EF: Field, BF: PrimeField> {
     /// sampled randomness (for each round) given by the verifier
     pub randomness: Vec<EF>,
     /// Stores a list of multilinear extensions
@@ -46,7 +45,7 @@ pub struct ProverState<EF: PrimeField, BF: PrimeField> {
     pub algo: AlgorithmType,
 }
 
-impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// Initialise prover state from a given set of polynomials (in their evaluation form).
     /// The degree of the sumcheck round polynomial also needs to be input.
     pub fn prover_init(
@@ -87,7 +86,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// https://github.com/ingonyama-zk/papers/blob/main/sumcheck_201_chapter_1.pdf
     ///
     /// Outputs the challenge (which is an extension field element).
-    pub fn compute_round_polynomial<G, C, F>(
+    pub fn compute_round_polynomial<C, F>(
         round_number: usize,
         state_polynomials: &Vec<LinearLagrangeList<F>>,
         round_polynomials: &mut Vec<Vec<EF>>,
@@ -96,7 +95,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         transcript: &mut Transcript,
     ) -> EF
     where
-        G: CurveGroup<ScalarField = EF>,
         C: Fn(&Vec<F>) -> EF + Sync,
         F: Field,
     {
@@ -119,14 +117,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
 
         // append the round polynomial (i.e. prover message) to the transcript
-        <Transcript as TranscriptProtocol<G>>::append_scalars(
+        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,
             b"r_poly",
             &round_polynomials[round_number - 1],
         );
 
         // generate challenge α_i = H( transcript );
-        let alpha: EF = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+        let alpha: EF = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
             transcript,
             b"challenge_nextround",
         );
@@ -137,7 +135,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// Algorithm 1: This algorithm is split into two computation phases.
     ///   Phase 1: Compute round 1 polynomial with only bb multiplications
     ///   Phase 2: Compute round 2, 3, ..., n polynomials with only ee multiplications
-    pub fn prove_with_naive_algorithm<G, EC, BC, T>(
+    pub fn prove_with_naive_algorithm<EC, BC, T>(
         prover_state: &mut ProverState<EF, BF>,
         ef_combine_function: &EC,
         bf_combine_function: &BC,
@@ -145,7 +143,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         round_polynomials: &mut Vec<Vec<EF>>,
         to_ef: &T,
     ) where
-        G: CurveGroup<ScalarField = EF>,
         EC: Fn(&Vec<EF>) -> EF + Sync,
         BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
@@ -154,7 +151,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let r_degree = prover_state.max_multiplicands;
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
-        let alpha = Self::compute_round_polynomial::<G, BC, BF>(
+        let alpha = Self::compute_round_polynomial::<BC, BF>(
             1,
             &prover_state.state_polynomials,
             round_polynomials,
@@ -178,7 +175,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         // Phase 2: Process the subsequent rounds with only ee multiplications.
         for round_number in 2..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<G, EC, EF>(
+            let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_number,
                 &ef_state_polynomials,
                 round_polynomials,
@@ -194,7 +191,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
     }
 
-    pub fn prove_with_witness_challenge_sep_agorithm<G, BC, BE, AEE, EE>(
+    pub fn prove_with_witness_challenge_sep_agorithm<BC, BE, AEE, EE>(
         prover_state: &mut ProverState<EF, BF>,
         bf_combine_function: &BC,
         transcript: &mut Transcript,
@@ -203,7 +200,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         add_ee: &AEE,
         mult_ee: &EE,
     ) where
-        G: CurveGroup<ScalarField = EF>,
         BC: Fn(&Vec<BF>) -> EF + Sync,
         BE: Fn(&BF, &EF) -> EF + Sync,
         AEE: Fn(&EF, &EF) -> EF + Sync,
@@ -213,7 +209,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let r_degree = prover_state.max_multiplicands;
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
-        let alpha = Self::compute_round_polynomial::<G, BC, BF>(
+        let alpha = Self::compute_round_polynomial::<BC, BF>(
             1,
             &prover_state.state_polynomials,
             round_polynomials,
@@ -334,14 +330,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as TranscriptProtocol<G>>::append_scalars(
+            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_number - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -365,7 +361,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     }
 
     /// Algorithm 3
-    pub fn prove_with_precomputation_agorithm<G, BE, EE, BB, EC>(
+    pub fn prove_with_precomputation_agorithm<BE, EE, BB, EC>(
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
@@ -375,7 +371,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_bb: &BB,
         ef_combine_function: &EC,
     ) where
-        G: CurveGroup<ScalarField = EF>,
         BE: Fn(&BF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
@@ -496,14 +491,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as TranscriptProtocol<G>>::append_scalars(
+            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_num - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -526,7 +521,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         // Process remaining rounds by switching to Algorithm 1
         for round_num in (round_t + 1)..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<G, EC, EF>(
+            let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
@@ -543,7 +538,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     }
 
     /// Algorithm 4
-    pub fn prove_with_toom_cook_agorithm<G, BE, EE, BB, EC>(
+    pub fn prove_with_toom_cook_agorithm<BE, EE, BB, EC>(
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
@@ -557,7 +552,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         interpolation_maps_ef: &Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
         ef_combine_function: &EC,
     ) where
-        G: CurveGroup<ScalarField = EF>,
         BE: Fn(&BF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
@@ -743,14 +737,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as TranscriptProtocol<G>>::append_scalars(
+            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_num - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -777,7 +771,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         // Process remaining rounds by switching to Algorithm 1
         for round_num in (round_t + 1)..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<G, EC, EF>(
+            let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
@@ -800,7 +794,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// We implement four algorithms to compute the sumcheck proof according to the algorithms in the small-field
     /// sumcheck paper by Justin Thaler: https://people.cs.georgetown.edu/jthaler/small-sumcheck.pdf
     ///
-    pub fn prove<G, EC, BC, T, BE, AEE, EE, BB>(
+    pub fn prove<EC, BC, T, BE, AEE, EE, BB>(
         prover_state: &mut ProverState<EF, BF>,
         ef_combine_function: &EC, // TODO: Using two combines is bad, templatize it?
         bf_combine_function: &BC,
@@ -816,7 +810,6 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF>>>,
     ) -> SumcheckProof<EF>
     where
-        G: CurveGroup<ScalarField = EF>,
         BC: Fn(&Vec<BF>) -> EF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
@@ -826,7 +819,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
         // Initiate the transcript with the protocol name
-        <Transcript as TranscriptProtocol<G>>::sumcheck_proof_domain_sep(
+        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             prover_state.num_vars as u64,
             prover_state.max_multiplicands as u64,
@@ -839,7 +832,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .collect();
 
         match prover_state.algo {
-            AlgorithmType::Naive => Self::prove_with_naive_algorithm::<G, EC, BC, T>(
+            AlgorithmType::Naive => Self::prove_with_naive_algorithm::<EC, BC, T>(
                 prover_state,
                 &ef_combine_function,
                 &bf_combine_function,
@@ -848,7 +841,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 to_ef,
             ),
             AlgorithmType::WitnessChallengeSeparation => {
-                Self::prove_with_witness_challenge_sep_agorithm::<G, BC, BE, AEE, EE>(
+                Self::prove_with_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
                     prover_state,
                     &bf_combine_function,
                     transcript,
@@ -859,7 +852,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 )
             }
             AlgorithmType::Precomputation => {
-                Self::prove_with_precomputation_agorithm::<G, BE, EE, BB, EC>(
+                Self::prove_with_precomputation_agorithm::<BE, EE, BB, EC>(
                     prover_state,
                     transcript,
                     &mut r_polys,
@@ -870,7 +863,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     ef_combine_function,
                 )
             }
-            AlgorithmType::Karatsuba => Self::prove_with_toom_cook_agorithm::<G, BE, EE, BB, EC>(
+            AlgorithmType::Karatsuba => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
                 prover_state,
                 transcript,
                 &mut r_polys,
@@ -897,7 +890,7 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// Proves the sumcheck relation for product of MLE polynomials using the witness-challenge
     /// separation algorithm (Algorithm 2 that uses pre-computations).
     ///
-    pub fn prove_product<G, BE, EE, BB>(
+    pub fn prove_product<BE, EE, BB>(
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
         mult_be: &BE,
@@ -905,13 +898,12 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_bb: &BB,
     ) -> SumcheckProof<EF>
     where
-        G: CurveGroup<ScalarField = EF>,
         BE: Fn(&BF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
         // Initiate the transcript with the protocol name
-        <Transcript as TranscriptProtocol<G>>::sumcheck_proof_domain_sep(
+        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             prover_state.num_vars as u64,
             prover_state.max_multiplicands as u64,
@@ -981,14 +973,14 @@ impl<EF: PrimeField, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as TranscriptProtocol<G>>::append_scalars(
+            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &r_polys[round_index],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as TranscriptProtocol<G>>::challenge_scalar(
+            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );

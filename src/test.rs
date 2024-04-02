@@ -16,7 +16,6 @@ mod integration_tests {
     type F = ark_bls12_381::Fr;
     type BF = ark_bls12_381::Fr;
     type EF = ark_bls12_381::Fr;
-    type G = ark_bls12_381::G1Projective;
 
     #[test]
     fn test_sumcheck() {
@@ -64,7 +63,7 @@ mod integration_tests {
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -81,7 +80,7 @@ mod integration_tests {
         );
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -145,7 +144,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -164,7 +163,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
             &mut prover_state_dup,
             &mut prover_transcript_dup,
             &mult_be,
@@ -173,7 +172,7 @@ mod integration_tests {
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -183,7 +182,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -250,7 +249,7 @@ mod integration_tests {
             AlgorithmType::WitnessChallengeSeparation,
         );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -269,7 +268,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<G, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
             &mut prover_state_dup,
             &mut prover_transcript_dup,
             &mult_be,
@@ -278,7 +277,7 @@ mod integration_tests {
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -288,7 +287,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -356,7 +355,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Precomputation);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -375,7 +374,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
             &combine_fn,
             &combine_fn,
@@ -392,7 +391,7 @@ mod integration_tests {
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -402,7 +401,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -530,7 +529,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -549,7 +548,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
             &combine_fn,
             &combine_fn,
@@ -569,7 +568,7 @@ mod integration_tests {
         assert_eq!(proof.round_polynomials, proof_dup.round_polynomials);
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -579,7 +578,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -696,7 +695,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -715,7 +714,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
             &combine_fn,
             &combine_fn,
@@ -735,7 +734,7 @@ mod integration_tests {
         assert_eq!(proof.round_polynomials, proof_dup.round_polynomials);
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -745,7 +744,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -812,10 +811,11 @@ mod integration_tests {
         ];
 
         // Define mappings
-        let map1 = Box::new(|x: &F, _y: &F| -> F { *x });
-        let map2 = Box::new(|x: &F, y: &F| -> F { *x + *y });
-        let map3 = Box::new(|x: &F, y: &F| -> F { *x - *y });
-        let map4 = Box::new(|_x: &F, y: &F| -> F { *y });
+        // x + y * W
+        let map1 = Box::new(|x: &F, _y: &F| -> F { *x }); // 0
+        let map2 = Box::new(|x: &F, y: &F| -> F { *x + *y }); // 1
+        let map3 = Box::new(|x: &F, y: &F| -> F { *x - *y }); // -1
+        let map4 = Box::new(|_x: &F, y: &F| -> F { *y }); // infty
         let maps: Vec<Box<dyn Fn(&F, &F) -> F>> = vec![map1, map2, map3, map4];
         let projective_map_indices = vec![0 as usize, 3 as usize];
 
@@ -847,6 +847,9 @@ mod integration_tests {
         // Hence the challenges are now different, and hence the proof generated using naive and toom-cook methods
         // would be different. We can simply adjust the verifier algorithm to take into account the determinant △.
         //
+        // △ * r_1(x)
+        // △^2 * r_2(x)
+        // ...
         let interpolation_matrix = vec![
             vec![2, 0, -2, 0],
             vec![0, 1, 1, 0],
@@ -859,7 +862,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -878,7 +881,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
             &combine_fn,
             &combine_fn,
@@ -900,7 +903,7 @@ mod integration_tests {
         // rᵢ₊₁(0) + rᵢ₊₁(1) == △ * rᵢ(αᵢ)
         //
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -910,7 +913,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -986,11 +989,12 @@ mod integration_tests {
         ];
 
         // Define mappings
-        let map1 = Box::new(|x: &F, _y: &F| -> F { *x });
-        let map2 = Box::new(|x: &F, y: &F| -> F { *x + *y });
-        let map3 = Box::new(|x: &F, y: &F| -> F { *x - *y });
-        let map4 = Box::new(|x: &F, y: &F| -> F { *x + (*y * F::from(2)) });
-        let map5 = Box::new(|_x: &F, y: &F| -> F { *y });
+        // p(x) = p0 + p1.x
+        let map1 = Box::new(|x: &F, _y: &F| -> F { *x }); // 0
+        let map2 = Box::new(|x: &F, y: &F| -> F { *x + *y }); // 1
+        let map3 = Box::new(|x: &F, y: &F| -> F { *x - *y }); // -1
+        let map4 = Box::new(|x: &F, y: &F| -> F { *x + (*y * F::from(2)) }); // 2
+        let map5 = Box::new(|_x: &F, y: &F| -> F { *y }); // inf
         let maps: Vec<Box<dyn Fn(&F, &F) -> F>> = vec![map1, map2, map3, map4, map5];
         let projective_map_indices = vec![0 as usize, 4 as usize];
 
@@ -1036,7 +1040,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -1055,7 +1059,7 @@ mod integration_tests {
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof_dup: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
             &combine_fn,
             &combine_fn,
@@ -1078,7 +1082,7 @@ mod integration_tests {
         //
         let round_t = Some(3 as usize);
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
@@ -1088,7 +1092,7 @@ mod integration_tests {
         assert_eq!(result.unwrap(), true);
 
         let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
@@ -1157,7 +1161,7 @@ mod integration_tests {
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, 3, AlgorithmType::Naive);
         let mut prover_transcript = Transcript::new(b"test_r1cs_sumcheck");
-        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<G, _, _, _, _, _, _, _>(
+        let proof: SumcheckProof<F> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_fn,
             &combine_fn,
@@ -1174,7 +1178,7 @@ mod integration_tests {
         );
 
         let mut verifier_transcript = Transcript::new(b"test_r1cs_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify::<G>(
+        let result = IPForMLSumcheck::<EF, BF>::verify(
             claimed_sum,
             &proof,
             &mut verifier_transcript,
