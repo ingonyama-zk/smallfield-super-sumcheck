@@ -1,8 +1,10 @@
 mod data_structures;
+mod error;
 mod extension_test;
 mod extension_transcript;
 mod prover;
 mod test;
+mod tests;
 mod transcript;
 mod verifier;
 

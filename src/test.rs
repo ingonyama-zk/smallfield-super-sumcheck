@@ -84,6 +84,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -176,6 +177,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -186,6 +188,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -281,6 +284,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::WitnessChallengeSeparation,
             None,
             None,
         );
@@ -291,6 +295,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -395,6 +400,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Precomputation,
             None,
             None,
         );
@@ -405,6 +411,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -572,6 +579,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             None,
             None,
         );
@@ -582,6 +590,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -738,6 +747,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             None,
             None,
         );
@@ -748,6 +758,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -907,6 +918,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             Some(EF::from(2 as u32)),
             Some(3 as usize),
         );
@@ -917,6 +929,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -1086,6 +1099,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             Some(EF::from(6 as u32)),
             round_t,
         );
@@ -1096,6 +1110,7 @@ mod integration_tests {
             claimed_sum,
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -1182,6 +1197,7 @@ mod integration_tests {
             claimed_sum,
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );

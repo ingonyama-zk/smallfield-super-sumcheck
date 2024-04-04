@@ -2,7 +2,10 @@ use ark_ff::{batch_inversion_and_mul, Field, PrimeField};
 use merlin::Transcript;
 
 use crate::{
-    extension_transcript::ExtensionTranscriptProtocol, prover::SumcheckProof, IPForMLSumcheck,
+    error::SumcheckError,
+    extension_transcript::ExtensionTranscriptProtocol,
+    prover::{AlgorithmType, SumcheckProof},
+    IPForMLSumcheck,
 };
 
 impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
@@ -21,11 +24,12 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         claimed_sum: EF,
         proof: &SumcheckProof<EF>,
         transcript: &mut Transcript,
+        algorithm: AlgorithmType,
         multiplicand: Option<EF>,
         round_t: Option<usize>,
-    ) -> Result<bool, &'static str> {
+    ) -> Result<bool, SumcheckError> {
         if proof.num_vars == 0 {
-            return Err("Invalid proof.");
+            return Err(SumcheckError::InvalidProof);
         }
 
         // Initiate the transcript with the protocol name
@@ -36,12 +40,24 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         );
 
         let multiplicand_inv = match multiplicand {
-            Some(m) => m.inverse().unwrap(),
+            Some(m) => {
+                if algorithm == AlgorithmType::Karatsuba {
+                    m.inverse().unwrap()
+                } else {
+                    EF::ONE
+                }
+            }
             None => EF::ONE,
         };
         let mut multiplicand_inv_pow_t = EF::ONE;
         let unwrapped_round_t = match round_t {
-            Some(t) => t,
+            Some(t) => {
+                if algorithm == AlgorithmType::Karatsuba {
+                    t
+                } else {
+                    0
+                }
+            }
             None => 0,
         };
         for _ in 0..unwrapped_round_t {
@@ -52,10 +68,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         for round_index in 0..proof.num_vars {
             let round_poly_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
             if round_poly_evaluations.len() != (proof.degree + 1) {
-                panic!(
-                    "incorrect number of evaluations of the {}-th round polynomial",
-                    round_index + 1
-                );
+                return Err(SumcheckError::InvalidRoundPolynomial);
             }
 
             let round_poly_evaluation_at_0 = round_poly_evaluations[0];
@@ -98,7 +111,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 None => expected_sum,
             };
             if computed_sum != modified_expected_sum {
-                return Err("Prover message is not consistent with the claim.".into());
+                return Err(SumcheckError::ProofVerificationFailure);
             }
 
             // append the prover's message to the transcript

@@ -20,3 +20,4 @@ ark-bls12-381 = { version = "0.4.0" }
 rand = "0.8"
 merlin = { version = "3.0.0" }
 itertools = "0.12.1"
+nalgebra = { version = "0.32.5" }

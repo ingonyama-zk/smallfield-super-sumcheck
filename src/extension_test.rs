@@ -9,6 +9,7 @@ mod extension_tests {
     use ark_ff::Zero;
     use ark_poly::DenseMultilinearExtension;
     use ark_poly::MultilinearExtension;
+    use ark_std::iterable::Iterable;
     use ark_std::test_rng;
     use ark_std::vec::Vec;
     use merlin::Transcript;
@@ -91,6 +92,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -190,6 +192,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -200,6 +203,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -303,6 +307,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::WitnessChallengeSeparation,
             None,
             None,
         );
@@ -313,6 +318,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -430,6 +436,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Precomputation,
             None,
             None,
         );
@@ -440,6 +447,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -620,6 +628,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             None,
             None,
         );
@@ -630,6 +639,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -801,6 +811,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             None,
             None,
         );
@@ -811,6 +822,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -983,6 +995,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             Some(EF::from(2 as u32)),
             Some(3 as usize),
         );
@@ -993,6 +1006,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -1177,6 +1191,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Karatsuba,
             Some(EF::from(6 as u32)),
             round_t,
         );
@@ -1187,6 +1202,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof_dup,
             &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
             None,
             None,
         );
@@ -1282,6 +1298,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
+            AlgorithmType::Naive,
             None,
             None,
         );
