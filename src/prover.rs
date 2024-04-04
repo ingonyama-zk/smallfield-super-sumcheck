@@ -12,6 +12,7 @@ use merlin::Transcript;
 use rayon::prelude::*;
 
 // A sumcheck proof contains all round polynomials
+#[derive(PartialEq, Debug)]
 pub struct SumcheckProof<EF: Field> {
     pub(crate) num_vars: usize,
     pub(crate) degree: usize,

@@ -169,7 +169,14 @@ mod test_helpers {
     /// Converts a matrix into maps.
     pub fn get_maps_from_matrix<FF: Field>(
         matrix: &Vec<Vec<i64>>,
+        divisor: i64,
     ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
+        assert!(divisor > 0);
+        let divisor_ff = FF::from(divisor.abs() as u32);
+        let mut divisor_inv_ff = FF::ONE;
+        if divisor != 1 {
+            divisor_inv_ff = divisor_ff.inverse().unwrap();
+        }
         matrix
             .iter()
             .map(|irow| {
@@ -178,10 +185,15 @@ mod test_helpers {
                     v.iter()
                         .zip(irow_cloned.iter())
                         .fold(FF::zero(), |acc, (value, scalar)| {
+                            let scalar_ff = FF::from((*scalar).abs() as u32);
+                            let mut scalar_by_divisor = scalar_ff;
+                            if divisor != 1 {
+                                scalar_by_divisor *= divisor_inv_ff;
+                            }
                             if *scalar < 0 {
-                                acc - FF::from((*scalar).abs() as u32) * value
+                                acc - scalar_by_divisor * value
                             } else {
-                                acc + FF::from((*scalar).abs() as u32) * value
+                                acc + scalar_by_divisor * value
                             }
                         })
                 });

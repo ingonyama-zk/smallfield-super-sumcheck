@@ -21,3 +21,4 @@ rand = "0.8"
 merlin = { version = "3.0.0" }
 itertools = "0.12.1"
 nalgebra = { version = "0.32.5" }
+rstest = { version = "0.18.2" }

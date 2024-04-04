@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod quadratic_extension_tests {
+mod quad_ext_tests {
     use crate::error::SumcheckError;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
@@ -13,6 +13,7 @@ mod quadratic_extension_tests {
     use ark_std::iterable::Iterable;
     use ark_std::vec::Vec;
     use merlin::Transcript;
+    use rstest::rstest;
 
     type BF = ark_bls12_381::Fq;
     type EF = ark_bls12_381::Fq2;
@@ -78,6 +79,7 @@ mod quadratic_extension_tests {
         nv: usize,
         degree: usize,
         algorithm: AlgorithmType,
+        with_inversions: bool,
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
@@ -85,7 +87,7 @@ mod quadratic_extension_tests {
             create_sumcheck_test_data(nv, degree, algorithm.clone());
 
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree);
+            setup_for_toom_cook(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -106,7 +108,7 @@ mod quadratic_extension_tests {
         );
 
         let mut round_t = 3 as usize;
-        if algorithm != AlgorithmType::Karatsuba {
+        if (algorithm != AlgorithmType::Karatsuba) || (with_inversions == true) {
             scaled_det = 1;
             round_t = 0;
         }
@@ -126,6 +128,7 @@ mod quadratic_extension_tests {
     /// Setup all mappings etc for the toom-cook algorithm.
     pub fn setup_for_toom_cook(
         degree: usize,
+        with_inversions: bool,
     ) -> (
         Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
         Vec<usize>,
@@ -153,8 +156,15 @@ mod quadratic_extension_tests {
 
         // Define interpolation mappings
         let (interpolation_matrix, scaled_det) = generate_interpolation_matrix_transpose(degree);
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix);
+
+        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
+        let mut divisor: i64 = 1;
+        if with_inversions {
+            divisor = scaled_det;
+        }
+
+        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
+        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
 
         (
             emaps_base,
@@ -165,99 +175,41 @@ mod quadratic_extension_tests {
         )
     }
 
-    #[test]
-    fn degree_two_product_sumcheck_algorithm_1() {
-        let (_, result) = sumcheck_test_helper(10, 2, AlgorithmType::Naive);
-        assert_eq!(result.unwrap(), true);
+    #[rstest]
+    fn check_sumcheck_product(
+        #[values(5, 8, 10, 12)] nv: usize,
+        #[values(1, 2, 3, 4, 5, 6)] degree: usize,
+        #[values(
+            AlgorithmType::Naive,
+            AlgorithmType::WitnessChallengeSeparation,
+            AlgorithmType::Precomputation,
+            AlgorithmType::Karatsuba
+        )]
+        algorithm: AlgorithmType,
+    ) {
+        assert_eq!(
+            sumcheck_test_helper(nv, degree, algorithm, false)
+                .1
+                .unwrap(),
+            true
+        );
     }
 
-    #[test]
-    fn degree_two_product_sumcheck_algorithm_2() {
-        let (_, result) = sumcheck_test_helper(10, 2, AlgorithmType::WitnessChallengeSeparation);
-        assert_eq!(result.unwrap(), true);
-    }
+    #[rstest]
+    fn check_proof_consistency(#[values(5, 8, 10)] nv: usize, #[values(1, 2, 3, 4)] degree: usize) {
+        let (proof_1, result_1) = sumcheck_test_helper(nv, degree, AlgorithmType::Naive, false);
+        let (proof_2, result_2) =
+            sumcheck_test_helper(nv, degree, AlgorithmType::WitnessChallengeSeparation, false);
+        let (proof_3, result_3) =
+            sumcheck_test_helper(nv, degree, AlgorithmType::Precomputation, false);
+        let (proof_4, result_4) = sumcheck_test_helper(nv, degree, AlgorithmType::Karatsuba, true);
 
-    #[test]
-    fn degree_two_product_sumcheck_algorithm_3() {
-        let (_, result) = sumcheck_test_helper(10, 2, AlgorithmType::Precomputation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_two_product_sumcheck_algorithm_4() {
-        let (_, result) = sumcheck_test_helper(10, 2, AlgorithmType::Karatsuba);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_three_product_sumcheck_algorithm_1() {
-        let (_, result) = sumcheck_test_helper(10, 3, AlgorithmType::Naive);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_three_product_sumcheck_algorithm_2() {
-        let (_, result) = sumcheck_test_helper(10, 3, AlgorithmType::WitnessChallengeSeparation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_three_product_sumcheck_algorithm_3() {
-        let (_, result) = sumcheck_test_helper(10, 3, AlgorithmType::Precomputation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_three_product_sumcheck_algorithm_4() {
-        let (_, result) = sumcheck_test_helper(10, 3, AlgorithmType::Karatsuba);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_four_product_sumcheck_algorithm_1() {
-        let (_, result) = sumcheck_test_helper(10, 4, AlgorithmType::Naive);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_four_product_sumcheck_algorithm_2() {
-        let (_, result) = sumcheck_test_helper(10, 4, AlgorithmType::WitnessChallengeSeparation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_four_product_sumcheck_algorithm_3() {
-        let (_, result) = sumcheck_test_helper(10, 4, AlgorithmType::Precomputation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_four_product_sumcheck_algorithm_4() {
-        let (_, result) = sumcheck_test_helper(10, 4, AlgorithmType::Karatsuba);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_five_product_sumcheck_algorithm_1() {
-        let (_, result) = sumcheck_test_helper(10, 5, AlgorithmType::Naive);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_five_product_sumcheck_algorithm_2() {
-        let (_, result) = sumcheck_test_helper(10, 5, AlgorithmType::WitnessChallengeSeparation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_five_product_sumcheck_algorithm_3() {
-        let (_, result) = sumcheck_test_helper(10, 5, AlgorithmType::Precomputation);
-        assert_eq!(result.unwrap(), true);
-    }
-
-    #[test]
-    fn degree_five_product_sumcheck_algorithm_4() {
-        let (_, result) = sumcheck_test_helper(10, 5, AlgorithmType::Karatsuba);
-        assert_eq!(result.unwrap(), true);
+        assert_eq!(result_1.unwrap(), true);
+        assert_eq!(result_2.unwrap(), true);
+        assert_eq!(result_3.unwrap(), true);
+        assert_eq!(result_4.unwrap(), true);
+        assert_eq!(proof_1, proof_2);
+        assert_eq!(proof_2, proof_3);
+        assert_eq!(proof_3, proof_4);
     }
 }
