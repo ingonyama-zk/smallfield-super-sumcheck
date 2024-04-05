@@ -12,6 +12,7 @@ use merlin::Transcript;
 use rayon::prelude::*;
 
 // A sumcheck proof contains all round polynomials
+#[derive(PartialEq, Debug)]
 pub struct SumcheckProof<EF: Field> {
     pub(crate) num_vars: usize,
     pub(crate) degree: usize,
@@ -23,7 +24,7 @@ pub enum AlgorithmType {
     Naive,
     WitnessChallengeSeparation,
     Precomputation,
-    Karatsuba,
+    ToomCook,
 }
 
 /// Prover State
@@ -805,6 +806,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         add_ee: &AEE,
         mult_ee: &EE,
         mult_bb: &BB,
+        round_t: Option<usize>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
         interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
@@ -832,6 +834,21 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .map(|_| vec![EF::zero(); r_degree + 1])
             .collect();
 
+        // Extract threshold round
+        let round_threshold = match round_t {
+            Some(t_value) => {
+                if (prover_state.algo == AlgorithmType::Precomputation)
+                    || (prover_state.algo == AlgorithmType::ToomCook)
+                {
+                    assert!(t_value <= prover_state.num_vars);
+                    t_value
+                } else {
+                    prover_state.num_vars
+                }
+            }
+            None => prover_state.num_vars,
+        };
+
         match prover_state.algo {
             AlgorithmType::Naive => Self::prove_with_naive_algorithm::<EC, BC, T>(
                 prover_state,
@@ -857,18 +874,18 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     prover_state,
                     transcript,
                     &mut r_polys,
-                    3,
+                    round_threshold,
                     mult_be,
                     mult_ee,
                     mult_bb,
                     ef_combine_function,
                 )
             }
-            AlgorithmType::Karatsuba => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
+            AlgorithmType::ToomCook => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
                 prover_state,
                 transcript,
                 &mut r_polys,
-                3,
+                round_threshold,
                 mult_be,
                 mult_ee,
                 mult_bb,

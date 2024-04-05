@@ -85,6 +85,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
@@ -170,6 +171,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -285,6 +287,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -410,6 +413,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -425,6 +429,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -583,7 +588,7 @@ mod extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -595,6 +600,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -618,6 +624,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         // The proofs generated with the naive and the toom-cook methods must exactly match.
@@ -628,7 +635,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             None,
             None,
         );
@@ -766,7 +773,7 @@ mod extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -778,6 +785,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -801,6 +809,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         // The proofs generated with the naive and the toom-cook methods must exactly match.
@@ -811,7 +820,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             None,
             None,
         );
@@ -948,7 +957,7 @@ mod extension_tests {
         let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -960,6 +969,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            Some(3),
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -983,6 +993,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         // Remember, we need to adjust for the △ term in the verifier. We only need to pass it as the
@@ -995,7 +1006,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             Some(EF::from(2 as u32)),
             Some(3 as usize),
         );
@@ -1143,7 +1154,7 @@ mod extension_tests {
         let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1155,6 +1166,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            Some(3),
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -1178,6 +1190,7 @@ mod extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         // Remember, we need to adjust for the △ term in the verifier. We only need to pass it as the
@@ -1191,7 +1204,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             Some(EF::from(6 as u32)),
             round_t,
         );
@@ -1287,6 +1300,7 @@ mod extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,

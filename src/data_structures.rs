@@ -349,23 +349,6 @@ impl<F: Field> MatrixPolynomial<F> {
         }
     }
 
-    pub fn flatten(&mut self) {
-        // Take ownership of the first row and replace it with an empty vector
-        let mut flattened_row = std::mem::take(&mut self.evaluation_rows[0]);
-
-        // Concatenate all other rows into the first row
-        for row_index in 1..self.no_of_rows {
-            flattened_row.extend_from_slice(&self.evaluation_rows[row_index]);
-        }
-
-        // Update the dimensions of the original matrix
-        self.no_of_columns *= self.no_of_rows;
-        self.no_of_rows = 1;
-
-        // Replace the first row with the concatenated row
-        self.evaluation_rows[0] = flattened_row;
-    }
-
     pub fn hadamard_product<P>(&self, rhs: &MatrixPolynomial<F>, mult_bb: &P) -> MatrixPolynomial<F>
     where
         P: Fn(&F, &F) -> F,
@@ -714,6 +697,23 @@ mod test {
         LinearLagrange::new(&random_field_element(), &random_field_element())
     }
 
+    pub fn flatten(input: &mut MatrixPolynomial<F>) {
+        // Take ownership of the first row and replace it with an empty vector
+        let mut flattened_row = std::mem::take(&mut input.evaluation_rows[0]);
+
+        // Concatenate all other rows into the first row
+        for row_index in 1..input.no_of_rows {
+            flattened_row.extend_from_slice(&input.evaluation_rows[row_index]);
+        }
+
+        // Update the dimensions of the original matrix
+        input.no_of_columns *= input.no_of_rows;
+        input.no_of_rows = 1;
+
+        // Replace the first row with the concatenated row
+        input.evaluation_rows[0] = flattened_row;
+    }
+
     #[test]
     fn test_bit_decompose() {
         // (001)(010)(111)(110)(001)
@@ -867,7 +867,7 @@ mod test {
         let mut matrix_poly = MatrixPolynomial::from_dense_mle(&poly);
 
         // Test if flatten works as intended
-        matrix_poly.flatten();
+        flatten(&mut matrix_poly);
         assert_eq!(matrix_poly.evaluation_rows[0], poly.evaluations);
         assert_eq!(matrix_poly.no_of_columns, poly.evaluations.len());
         assert_eq!(matrix_poly.no_of_rows, 1);
@@ -973,9 +973,9 @@ mod test {
         let mut matrix_poly_c = MatrixPolynomial::from_dense_mle(&poly_c);
 
         // First flatten all matrix polynomials
-        matrix_poly_a.flatten();
-        matrix_poly_b.flatten();
-        matrix_poly_c.flatten();
+        flatten(&mut matrix_poly_a);
+        flatten(&mut matrix_poly_b);
+        flatten(&mut matrix_poly_c);
 
         let output_1 = MatrixPolynomial::tensor_inner_product(
             &vec![
