@@ -108,7 +108,7 @@ mod quad_ext_tests {
         );
 
         let mut round_t = 3 as usize;
-        if (algorithm != AlgorithmType::Karatsuba) || (with_inversions == true) {
+        if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
             scaled_det = 1;
             round_t = 0;
         }
@@ -183,7 +183,7 @@ mod quad_ext_tests {
             AlgorithmType::Naive,
             AlgorithmType::WitnessChallengeSeparation,
             AlgorithmType::Precomputation,
-            AlgorithmType::Karatsuba
+            AlgorithmType::ToomCook
         )]
         algorithm: AlgorithmType,
     ) {
@@ -202,7 +202,7 @@ mod quad_ext_tests {
             sumcheck_test_helper(nv, degree, AlgorithmType::WitnessChallengeSeparation, false);
         let (proof_3, result_3) =
             sumcheck_test_helper(nv, degree, AlgorithmType::Precomputation, false);
-        let (proof_4, result_4) = sumcheck_test_helper(nv, degree, AlgorithmType::Karatsuba, true);
+        let (proof_4, result_4) = sumcheck_test_helper(nv, degree, AlgorithmType::ToomCook, true);
 
         assert_eq!(result_1.unwrap(), true);
         assert_eq!(result_2.unwrap(), true);

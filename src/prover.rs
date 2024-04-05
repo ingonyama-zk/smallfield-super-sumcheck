@@ -24,7 +24,7 @@ pub enum AlgorithmType {
     Naive,
     WitnessChallengeSeparation,
     Precomputation,
-    Karatsuba,
+    ToomCook,
 }
 
 /// Prover State
@@ -865,7 +865,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     ef_combine_function,
                 )
             }
-            AlgorithmType::Karatsuba => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
+            AlgorithmType::ToomCook => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
                 prover_state,
                 transcript,
                 &mut r_polys,

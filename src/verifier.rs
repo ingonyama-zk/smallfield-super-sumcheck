@@ -41,7 +41,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         let multiplicand_inv = match multiplicand {
             Some(m) => {
-                if algorithm == AlgorithmType::Karatsuba {
+                if algorithm == AlgorithmType::ToomCook {
                     m.inverse().unwrap()
                 } else {
                     EF::ONE
@@ -52,7 +52,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let mut multiplicand_inv_pow_t = EF::ONE;
         let unwrapped_round_t = match round_t {
             Some(t) => {
-                if algorithm == AlgorithmType::Karatsuba {
+                if algorithm == AlgorithmType::ToomCook {
                     t
                 } else {
                     0

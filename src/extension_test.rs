@@ -583,7 +583,7 @@ mod extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -628,7 +628,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             None,
             None,
         );
@@ -766,7 +766,7 @@ mod extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -811,7 +811,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             None,
             None,
         );
@@ -948,7 +948,7 @@ mod extension_tests {
         let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -995,7 +995,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             Some(EF::from(2 as u32)),
             Some(3 as usize),
         );
@@ -1143,7 +1143,7 @@ mod extension_tests {
         let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Karatsuba);
+            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1191,7 +1191,7 @@ mod extension_tests {
             to_ef(&claimed_sum),
             &proof,
             &mut verifier_transcript,
-            AlgorithmType::Karatsuba,
+            AlgorithmType::ToomCook,
             Some(EF::from(6 as u32)),
             round_t,
         );
