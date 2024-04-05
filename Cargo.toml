@@ -1,5 +1,5 @@
 [package]
-name = "mle_single_poly"
+name = "smallfield_sumcheck"
 version = "0.1.0"
 edition = "2021"
 
