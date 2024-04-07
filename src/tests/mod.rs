@@ -1,7 +1,6 @@
 mod bls12_381;
 
-#[cfg(test)]
-mod test_helpers {
+pub mod test_helpers {
     use ark_ff::{Field, PrimeField};
     use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
     use ark_std::test_rng;

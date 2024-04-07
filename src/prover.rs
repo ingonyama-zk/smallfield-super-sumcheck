@@ -19,7 +19,7 @@ pub struct SumcheckProof<EF: Field> {
     pub(crate) round_polynomials: Vec<Vec<EF>>,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum AlgorithmType {
     Naive,
     WitnessChallengeSeparation,
