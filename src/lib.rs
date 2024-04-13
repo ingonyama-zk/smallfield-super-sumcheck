@@ -11,6 +11,10 @@ pub mod verifier;
 use ark_ff::{Field, PrimeField};
 use ark_std::marker::PhantomData;
 
+extern crate flame;
+#[macro_use]
+extern crate flamer;
+
 /// Interactive Proof for Multilinear Sumcheck
 /// Same as arkworks ML sumcheck implementation
 pub struct IPForMLSumcheck<EF: Field, BF: PrimeField> {

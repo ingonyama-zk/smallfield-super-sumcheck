@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod fq2_tests {
+    use std::fs::File;
+
     use crate::error::SumcheckError;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
@@ -176,6 +178,20 @@ mod fq2_tests {
             imaps_ext,
             scaled_det,
         )
+    }
+
+    #[test]
+    #[flame]
+    fn test_sumcheck_prod_pro() {
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(10, 2, 3, AlgorithmType::ToomCook, false)
+                .1
+                .unwrap(),
+            true
+        );
+
+        flame::dump_html(File::create("flamegraph_3_1.html").unwrap()).unwrap();
     }
 
     #[rstest]

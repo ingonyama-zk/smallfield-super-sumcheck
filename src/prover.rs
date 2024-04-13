@@ -6,6 +6,7 @@ use crate::{
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use ark_std::{log2, vec::Vec};
+use flamer::flame;
 use merlin::Transcript;
 
 #[cfg(feature = "parallel")]
@@ -363,6 +364,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     }
 
     /// Algorithm 3
+    #[flame]
     pub fn prove_with_precomputation_agorithm<BE, EE, BB, EC>(
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
@@ -633,6 +635,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         //  3    Σ_y ∏_i p_i(1, y)                Σ_x ∏_i p_i(1, 0, x)                 +  Σ_x ∏_i p_i(1, 1, x)                   C[12] + C[15]
         // +-----------------------------------------------------------------------------------------------------------------------------------+
         //
+        flame::start("precompute");
         for _ in 2..=round_t {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
@@ -648,7 +651,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
             for i in 0..matrix_polynomials.len() {
                 let matrix_terms_x =
-                    MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings);
+                    MatrixPolynomial::apply_map(&matrix_polynomials[i], j, mappings);
                 product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x, mult_bb);
             }
 
@@ -665,6 +668,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             num_evals,
             projection_mapping_indices,
         );
+        flame::end("precompute");
 
         // Initialise empty challenge matrix
         let mut challenge_matrix: MatrixPolynomial<EF> = MatrixPolynomial::<EF> {
@@ -684,6 +688,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         // Process first t rounds
         for round_num in 1..=round_t {
+            flame::start(format!("round {}", round_num));
             let round_size = num_evals.pow(round_num as u32);
 
             // Fetch (d + 1)^p witness terms using only bb additions
@@ -752,6 +757,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             );
 
             // Update the challenge matrix with the new challenge row
+            flame::start("challenge");
             challenge_matrix.update_with_challenge(alpha, &interpolation_maps_ef, mult_ee);
 
             // Update challenge matrix with new challenge
@@ -761,6 +767,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
+
+            flame::end("challenge");
+            flame::end(format!("round {}", round_num));
         }
 
         // We will now switch back to Algorithm 1: so we compute the arrays A_i such that

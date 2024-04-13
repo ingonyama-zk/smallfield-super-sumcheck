@@ -94,6 +94,30 @@ pub fn bit_extend_and_insert(
     output + insertion_output
 }
 
+pub fn bit_decompose_with_base(base: usize, input: usize, num_bytes: u32) -> Vec<usize> {
+    let mut output: Vec<usize> = Vec::with_capacity(num_bytes as usize);
+    let mut divisor = 1;
+    for _ in 0..num_bytes {
+        let byte_i = (input / divisor) % base;
+        divisor *= base;
+        output.push(byte_i);
+    }
+    output
+}
+
+pub fn bit_reverse(base: usize, input: usize, num_bytes: u32) -> usize {
+    let mut result: usize = 0;
+    let mut divisor = 1;
+    let mut multiplicand = base.pow(num_bytes - 1);
+    for _ in 0..num_bytes {
+        let byte_i = (input / divisor) % base;
+        result += byte_i * multiplicand;
+        divisor *= base;
+        multiplicand /= base;
+    }
+    result
+}
+
 /// Represents a pair of values (p(0), p(1)) where p(.) is a linear univariate polynomial of the form:
 /// p(X) = p(0).(1 - X) + p(1).X
 /// where X is any field element. So we have:
@@ -349,6 +373,7 @@ impl<F: Field> MatrixPolynomial<F> {
         }
     }
 
+    #[flame]
     pub fn hadamard_product<P>(&self, rhs: &MatrixPolynomial<F>, mult_bb: &P) -> MatrixPolynomial<F>
     where
         P: Fn(&F, &F) -> F,
@@ -375,6 +400,216 @@ impl<F: Field> MatrixPolynomial<F> {
         output
     }
 
+    #[flame]
+    pub fn get_combined_map(
+        index_j: usize,
+        depth: u32,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+    ) -> Vec<F> {
+        let num_maps = mappings.len();
+        let index_j_bytes = bit_decompose_with_base(num_maps, index_j, depth);
+        let mut a_values: Vec<F> = Vec::with_capacity(depth as usize);
+        let mut b_values: Vec<F> = Vec::with_capacity(depth as usize);
+        for i in 0..depth {
+            let index_byte = index_j_bytes[i as usize];
+            let ai = mappings[index_byte](&F::ONE, &F::zero());
+            let bi = mappings[index_byte](&F::zero(), &F::ONE);
+            a_values.push(ai);
+            b_values.push(bi);
+        }
+
+        let row_size = (1u32 << depth) as usize;
+        let mut res: Vec<F> = Vec::with_capacity(row_size);
+        for j in 0..row_size {
+            let mut output_value = F::ONE;
+            let j_bits = bit_decompose_with_base(2, j, depth);
+            for k in 0..(depth as usize) {
+                if j_bits[k] == 0 {
+                    output_value *= a_values[k];
+                } else {
+                    output_value *= b_values[k];
+                }
+            }
+            res.push(output_value);
+        }
+        res
+    }
+
+    #[flame]
+    pub fn get_combined_map_u16(
+        index_j: usize,
+        depth: u32,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+    ) -> Vec<u16> {
+        let num_maps = mappings.len();
+        let index_j_bytes = bit_decompose_with_base(num_maps, index_j, depth);
+        let mut a_values: Vec<u8> = Vec::with_capacity(depth as usize);
+        let mut b_values: Vec<u8> = Vec::with_capacity(depth as usize);
+        for i in 0..depth {
+            let index_byte = index_j_bytes[i as usize];
+            // Assuming `a` is your field element
+            let ai = mappings[index_byte](&F::ONE, &F::zero());
+            let mut a_buf = vec![];
+            ai.serialize_compressed(&mut a_buf).unwrap();
+
+            let bi = mappings[index_byte](&F::zero(), &F::ONE);
+            let mut b_buf = vec![];
+            bi.serialize_compressed(&mut b_buf).unwrap();
+
+            a_values.push(a_buf[0]);
+            b_values.push(b_buf[0]);
+        }
+
+        let row_size = (1u32 << depth) as usize;
+        let mut res: Vec<u16> = Vec::with_capacity(row_size);
+        for j in 0..row_size {
+            let mut output_value = 1u16;
+            let j_bits = bit_decompose_with_base(2, j, depth);
+            for k in 0..(depth as usize) {
+                if j_bits[k] == 0 {
+                    output_value *= a_values[k] as u16;
+                } else {
+                    output_value *= b_values[k] as u16;
+                }
+            }
+            res.push(output_value);
+        }
+        res
+    }
+
+    pub fn mult_small_with_big(small: &u16, big: &F) -> F {
+        let mut accumulator = F::zero();
+        let mut power = *big;
+        let mut small_bits = bit_decompose(*small as usize, 16, 1);
+        small_bits.reverse();
+
+        for bit in small_bits {
+            if bit == 1 {
+                accumulator += power;
+            }
+            power += power;
+        }
+        accumulator
+    }
+
+    #[flame]
+    pub fn apply_map_faster(
+        input_polynomial: &MatrixPolynomial<F>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+    ) -> MatrixPolynomial<F> {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        let depth = log2(input_polynomial.no_of_rows);
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut output = MatrixPolynomial {
+            no_of_rows: 1,
+            no_of_columns: input_polynomial.no_of_columns,
+            evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
+        };
+
+        let combined_map_j = MatrixPolynomial::get_combined_map(index_j, depth, &mappings);
+        flame::start("applying_maps");
+        for col_idx in 0..input_polynomial.no_of_columns {
+            let combined_map_times_input = input_polynomial
+                .evaluation_rows
+                .iter()
+                .zip(combined_map_j.iter())
+                .fold(F::zero(), |acc, (row, map_value)| {
+                    acc + row[col_idx] * map_value
+                });
+            output.evaluation_rows[0].push(combined_map_times_input);
+        }
+        flame::end("applying_maps");
+        output
+    }
+
+    #[flame]
+    pub fn apply_map(
+        input_polynomial: &MatrixPolynomial<F>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+    ) -> MatrixPolynomial<F> {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        let depth = log2(input_polynomial.no_of_rows);
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut output = MatrixPolynomial {
+            no_of_rows: 1,
+            no_of_columns: input_polynomial.no_of_columns,
+            evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
+        };
+
+        let combined_map_j = MatrixPolynomial::get_combined_map(index_j, depth, &mappings);
+        flame::start("applying_maps");
+        for col_idx in 0..input_polynomial.no_of_columns {
+            let combined_map_times_input = input_polynomial
+                .evaluation_rows
+                .iter()
+                .zip(combined_map_j.iter())
+                .fold(F::zero(), |acc, (row, map_value)| {
+                    acc + row[col_idx] * map_value
+                });
+            output.evaluation_rows[0].push(combined_map_times_input);
+        }
+        flame::end("applying_maps");
+        output
+    }
+
+    ///
+    /// a0 --
+    ///      |-- [b0, b1, b2, b3, b4] --
+    /// a1 --                           |
+    ///                                 |-- [b0c0_0, b0c0_1, b0c0_2, b0c0_3, b0c0_4]
+    ///                                 |   [b1c1_0, b1c1_1, b1c1_2, b1c1_3, b1c1_4]
+    /// a2 --                           |
+    ///      |-- [c0, c1, c2, c3, c4] --
+    /// a3 --
+    pub fn apply_recursive_maps(
+        input: &Vec<F>,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F>>,
+        projection_mapping_indices: &Vec<usize>,
+    ) -> Vec<F> {
+        let input_size = input.len();
+        assert!(input_size.is_power_of_two());
+        let num_maps = mappings.len();
+        let num_proj_maps = projection_mapping_indices.len();
+        assert!(num_proj_maps == 2);
+        assert_eq!(projection_mapping_indices, &vec![0, 1]);
+
+        let depth = log2(input_size) as usize;
+        let mut intermediate = input.clone();
+        for i in 0..depth {
+            println!("inter[{}]\n{:?}", i, intermediate);
+            assert!(intermediate.len() & 1 == 0);
+            let step_size = intermediate.len() / 2;
+            let mut temporary: Vec<F> = Vec::with_capacity(step_size * num_maps);
+            for j in 0..step_size {
+                let mut index_a = j;
+                let mut index_b = j + step_size;
+                if i == 0 {
+                    index_a = 2 * j;
+                    index_b = 2 * j + 1;
+                }
+                for map in mappings {
+                    let map_result = map(&intermediate[index_a], &intermediate[index_b]);
+                    temporary.push(map_result);
+                }
+            }
+            intermediate = temporary;
+        }
+        intermediate
+    }
+
+    #[flame]
     pub fn compute_merkle_roots(
         input_polynomial: &MatrixPolynomial<F>,
         index_j: usize,
@@ -424,6 +659,7 @@ impl<F: Field> MatrixPolynomial<F> {
         output
     }
 
+    #[flame]
     pub fn merkle_sums(
         input: &Vec<F>,
         num_children: usize,
@@ -457,6 +693,7 @@ impl<F: Field> MatrixPolynomial<F> {
         output
     }
 
+    #[flame]
     pub fn tensor_hadamard_product<P>(
         &self,
         rhs: &MatrixPolynomial<F>,
@@ -488,6 +725,7 @@ impl<F: Field> MatrixPolynomial<F> {
         output
     }
 
+    #[flame]
     pub fn tensor_inner_product<P>(matrices: &Vec<MatrixPolynomial<F>>, mult_bb: &P) -> Vec<F>
     where
         P: Fn(&F, &F) -> F,
@@ -566,6 +804,7 @@ impl<F: Field> MatrixPolynomial<F> {
             })
     }
 
+    #[flame]
     pub fn scale_and_squash<OtherF, P>(
         self: &MatrixPolynomial<F>,
         multiplicand: &MatrixPolynomial<OtherF>,
@@ -593,6 +832,7 @@ impl<F: Field> MatrixPolynomial<F> {
         LinearLagrangeList::<OtherF>::from_vector(&scaled_vec)
     }
 
+    #[flame]
     pub fn update_with_challenge<P>(
         &mut self,
         challenge: F,
@@ -676,16 +916,20 @@ impl<F: Field> fmt::Debug for MatrixPolynomial<F> {
 
 #[cfg(test)]
 mod test {
+    use std::vec;
+
     use crate::data_structures::{
-        bit_extend, bit_extend_and_insert, LinearLagrange, LinearLagrangeList,
+        bit_decompose_with_base, bit_extend, bit_extend_and_insert, LinearLagrange,
+        LinearLagrangeList,
     };
     use ark_bls12_381::Fr as F;
     use ark_ff::{Field, Zero};
     use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
+    use ark_std::log2;
     use itertools::izip;
     use rand::Rng;
 
-    use super::{bit_decompose, MatrixPolynomial};
+    use super::{bit_decompose, bit_reverse, MatrixPolynomial};
 
     pub fn random_field_element<F: Field>() -> F {
         let mut rng = rand::thread_rng();
@@ -745,6 +989,85 @@ mod test {
         // 5465010199  =>  (001[0100])(010[1101])(111[0101])(110[0000])(001[0111])
         let output = bit_extend_and_insert(value, 15, value_to_insert, 20, 3, 7);
         assert_eq!(output, 5465010199);
+    }
+
+    #[test]
+    fn test_bit_decompose_with_base() {
+        // 5617  =>  (001)(010)(111)(110)(001)
+        let input: usize = 5617;
+        let num_bytes = 5;
+        let base = 8;
+        let out1 = bit_decompose_with_base(base, input, num_bytes);
+        assert_eq!(out1[0], 1);
+        assert_eq!(out1[1], 6);
+        assert_eq!(out1[2], 7);
+        assert_eq!(out1[3], 2);
+        assert_eq!(out1[4], 1);
+
+        // input: 3 4 2 0 1 4 1
+        let base2: usize = 5;
+        let mut input2: usize = 0;
+        input2 += 1 * base2.pow(0);
+        input2 += 4 * base2.pow(1);
+        input2 += 1 * base2.pow(2);
+        input2 += 0 * base2.pow(3);
+        input2 += 2 * base2.pow(4);
+        input2 += 4 * base2.pow(5);
+        input2 += 3 * base2.pow(6);
+
+        let out2 = bit_decompose_with_base(base2, input2, 7);
+        assert_eq!(out2[0], 1);
+        assert_eq!(out2[1], 4);
+        assert_eq!(out2[2], 1);
+        assert_eq!(out2[3], 0);
+        assert_eq!(out2[4], 2);
+        assert_eq!(out2[5], 4);
+        assert_eq!(out2[6], 3);
+    }
+
+    #[test]
+    fn test_bit_reverse() {
+        // 5617  =>  (001)(010)(111)(110)(001)
+        let input: usize = 5617;
+        let num_bytes = 5;
+        let base = 8;
+        let out1 = bit_reverse(base, input, num_bytes);
+        // bit_reverse(5617) => (001)(110)(111)(010)(001)
+        assert_eq!(out1, 7633);
+
+        // input: 3 4 2 0 1 4 1
+        let base2: usize = 5;
+        let mut input2: usize = 0;
+        input2 += 1 * base2.pow(0);
+        input2 += 4 * base2.pow(1);
+        input2 += 1 * base2.pow(2);
+        input2 += 0 * base2.pow(3);
+        input2 += 2 * base2.pow(4);
+        input2 += 4 * base2.pow(5);
+        input2 += 3 * base2.pow(6);
+
+        let mut exp2 = 0;
+        exp2 += 3 * base2.pow(0);
+        exp2 += 4 * base2.pow(1);
+        exp2 += 2 * base2.pow(2);
+        exp2 += 0 * base2.pow(3);
+        exp2 += 1 * base2.pow(4);
+        exp2 += 4 * base2.pow(5);
+        exp2 += 1 * base2.pow(6);
+        let out2 = bit_reverse(base2, input2, 7);
+        assert_eq!(out2, exp2);
+
+        // input: 1 0
+        let mut input3: usize = 0;
+        input3 += 0 * base2.pow(0);
+        input3 += 1 * base2.pow(1);
+
+        // expect: 0 1
+        let mut exp3 = 0;
+        exp3 += 1 * base2.pow(0);
+        exp3 += 0 * base2.pow(1);
+        let out3 = bit_reverse(base2, input3, 2);
+        assert_eq!(out3, exp3);
     }
 
     #[test]
@@ -1202,5 +1525,109 @@ mod test {
             );
             multiplicand *= scaling_factor;
         }
+    }
+
+    #[test]
+    fn test_get_combined_map() {
+        let depth = 3;
+        let num_evals = 5;
+        let mut mappings: Vec<Box<dyn Fn(&F, &F) -> F>> = Vec::with_capacity(num_evals);
+        mappings.push(Box::new(move |x: &F, _y: &F| -> F { *x }));
+        mappings.push(Box::new(move |_x: &F, y: &F| -> F { *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + F::from(2) * *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { F::from(5) * *x + *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + *y }));
+
+        let out1 = MatrixPolynomial::get_combined_map(17, depth, &mappings);
+        println!("out1 = {:?}", out1);
+    }
+
+    #[test]
+    fn test_get_combined_map_u16() {
+        let depth = 3;
+        let num_evals = 5;
+        let mut mappings: Vec<Box<dyn Fn(&F, &F) -> F>> = Vec::with_capacity(num_evals);
+        mappings.push(Box::new(move |x: &F, _y: &F| -> F { *x }));
+        mappings.push(Box::new(move |_x: &F, y: &F| -> F { *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + F::from(2) * *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { F::from(5) * *x + *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + *y }));
+
+        let out1 = MatrixPolynomial::get_combined_map_u16(17, depth, &mappings);
+        println!("out1 = {:?}", out1);
+    }
+
+    #[test]
+    fn test_mult_small_big() {
+        let small: u16 = 7;
+        let big: F = random_field_element();
+        let output: F = MatrixPolynomial::mult_small_with_big(&small, &big);
+        let expected: F = F::from(small) * big;
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_apply_recursive_maps() {
+        let input: Vec<F> = vec![
+            F::from(2),
+            F::from(7),
+            F::from(12),
+            F::from(9),
+            F::from(1),
+            F::from(4),
+            F::from(5),
+            F::from(8),
+            F::from(2),
+            F::from(7),
+            F::from(12),
+            F::from(9),
+            F::from(1),
+            F::from(4),
+            F::from(5),
+            F::from(8),
+        ];
+        let num_vars = log2(input.len());
+        let num_evals = 5;
+        let mut mappings: Vec<Box<dyn Fn(&F, &F) -> F>> = Vec::with_capacity(num_evals);
+        mappings.push(Box::new(move |x: &F, _y: &F| -> F { *x }));
+        mappings.push(Box::new(move |_x: &F, y: &F| -> F { *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + F::from(2) * *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { F::from(5) * *x + *y }));
+        mappings.push(Box::new(move |x: &F, y: &F| -> F { *x + *y }));
+
+        let out = MatrixPolynomial::apply_recursive_maps(&input, &mappings, &vec![0, 1]);
+        println!("output = {:?}", out);
+        println!("out_len = {}", out.len());
+
+        let mut input_matrix = MatrixPolynomial::from_dense_mle(
+            &DenseMultilinearExtension::from_evaluations_vec(num_vars as usize, input.clone()),
+        );
+        input_matrix.heighten();
+        input_matrix.heighten();
+        let num_product_terms = num_evals.pow(num_vars);
+        let mut merkle_vec: Vec<F> = Vec::with_capacity(num_product_terms);
+        let mut other_vec: Vec<F> = Vec::with_capacity(num_product_terms);
+        for j in 0..num_product_terms {
+            let merkle_root = MatrixPolynomial::compute_merkle_roots(&input_matrix, j, &mappings);
+            let apply_map_to_input = MatrixPolynomial::apply_map(&input_matrix, j, &mappings);
+            merkle_vec.push(merkle_root.evaluation_rows[0][0]);
+            other_vec.push(apply_map_to_input.evaluation_rows[0][0]);
+        }
+        println!("merkle:\n{:?}", merkle_vec);
+        println!("merkle_len = {}", merkle_vec.len());
+        println!("other:\n{:?}", other_vec);
+        println!("other_len = {}", other_vec.len());
+        println!("var = {}", num_vars);
+        assert_eq!(merkle_vec, other_vec);
+
+        // // let factor = num_product_terms / num_evals;
+        // for i in 0..num_product_terms {
+        //     // factor /= num_evals;
+        //     println!("i = {}", i);
+        //     let irev = bit_reverse(num_evals, i, num_vars);
+        //     println!("irev = {}", irev);
+        //     // println!("factor = {}", factor);
+        //     assert_eq!(merkle_vec[i], out[irev]);
+        // }
     }
 }
