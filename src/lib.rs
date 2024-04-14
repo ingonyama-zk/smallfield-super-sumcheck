@@ -1,12 +1,12 @@
-mod data_structures;
-mod error;
+pub mod data_structures;
+pub mod error;
 mod extension_test;
 mod extension_transcript;
-mod prover;
+pub mod prover;
 mod test;
-mod tests;
+pub mod tests;
 mod transcript;
-mod verifier;
+pub mod verifier;
 
 use ark_ff::{Field, PrimeField};
 use ark_std::marker::PhantomData;
