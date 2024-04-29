@@ -28,8 +28,9 @@ pub struct BabyBearFq2Config;
 impl Fp2Config for BabyBearFq2Config {
     type Fp = BabyBearFq;
 
-    /// NONRESIDUE = -1
-    const NONRESIDUE: BabyBearFq = MontFp!("-1");
+    /// NONRESIDUE = 23
+    /// Irreducible polynomial: x^2 - 23
+    const NONRESIDUE: BabyBearFq = MontFp!("23");
 
     /// Coefficients for the Frobenius automorphism.
     const FROBENIUS_COEFF_FP2_C1: &'static [BabyBearFq] = &[
@@ -46,23 +47,41 @@ pub struct BabyBearFq4Config;
 impl Fp4Config for BabyBearFq4Config {
     type Fp2Config = BabyBearFq2Config;
 
+    /// NONRESIDUE: i
+    /// Irreducible polynomial y^2 - i
     const NONRESIDUE: BabyBearFq2 = BabyBearFq2::new(BabyBearFq::ZERO, BabyBearFq::ONE);
 
     // Coefficients for the Frobenius automorphism.
-    // c1[0] = 1,
-    // c1[1] = 281474976710656,
-    // c1[2] = 18446744069414584320, (= q - 1)
-    // c1[3] = 18446462594437873665,
-    //
     // (Calculated using sage math)
     //
+    // ```sage
+    // q = 2**31 - 2**27 + 1
+    // F = GF(q)
+    // R.<x> = F[]
+    // f1 = x^2 + 31
+    // assert f1.is_irreducible()
+    // K.<i> = F.extension(f1) # degree 2 extension
+    //
+    // R2.<y> = K[]
+    // f2 = y^2 + i
+    // assert f2.is_irreducible()
+    // L.<j> = K.extension(f2) # degree 4 extension
+    //
+    // # Prints frobenius coefficients
+    // # Note size of fq2 = q^2
+    // pretty_print(i ** ((q**0 - 1) / 4))
+    // pretty_print(i ** ((q**2 - 1) / 4))
+    // pretty_print(i ** ((q**4 - 1) / 4))
+    // pretty_print(i ** ((q**6 - 1) / 4))
+    // ```
+    //
     // These are calculated as
-    // `FROBENIUS_COEFF_FP4_C1[i] = Fp2Config::NONRESIDUE^((q^i - 1) / 4)`.
+    // `FROBENIUS_COEFF_FP4_C1[i] = Fp2Config::NONRESIDUE^((q^2i - 1) / 4)`.
     const FROBENIUS_COEFF_FP4_C1: &'static [BabyBearFq] = &[
         BabyBearFq::ONE,
-        MontFp!("281474976710656"),
+        MontFp!("284861408"),
         MontFp!("-1"),
-        MontFp!("18446462594437873665"),
+        MontFp!("1728404513"),
     ];
 }
 
@@ -96,11 +115,6 @@ impl Fp4Config for GoldilocksFq4Config {
     const NONRESIDUE: GoldlocksFq2 = GoldlocksFq2::new(GoldlocksFq::ZERO, GoldlocksFq::ONE);
 
     // Coefficients for the Frobenius automorphism.
-    // c1[0] = 1,
-    // c1[1] = 281474976710656,
-    // c1[2] = 18446744069414584320, (= q - 1)
-    // c1[3] = 18446462594437873665,
-    //
     // (Calculated using sage math)
     //
     // These are calculated as
