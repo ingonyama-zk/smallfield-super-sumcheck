@@ -1,6 +1,6 @@
 mod baby_bear;
 mod bls12_381;
-mod fields;
+pub mod fields;
 mod goldilocks;
 
 pub mod test_helpers {

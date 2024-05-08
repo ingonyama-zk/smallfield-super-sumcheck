@@ -9,18 +9,16 @@ mod fq4_tests {
     use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::IPForMLSumcheck;
 
-    use ark_ff::{Field, Zero};
+    use ark_ff::Field;
     use ark_std::iterable::Iterable;
     use ark_std::vec::Vec;
     use merlin::Transcript;
     use rstest::rstest;
 
     use crate::tests::fields::BabyBearFq;
-    use crate::tests::fields::BabyBearFq2;
     use crate::tests::fields::BabyBearFq4;
 
     type BF = BabyBearFq;
-    type MF = BabyBearFq2;
     type EF = BabyBearFq4;
 
     pub fn create_primitive_functions() -> (
@@ -35,7 +33,6 @@ mod fq4_tests {
         // Convert a base field element to an extension field element
         let to_ef: Box<dyn Fn(&BF) -> EF + Sync> = Box::new(|base_field_element: &BF| -> EF {
             EF::from_base_prime_field(*base_field_element)
-            // EF::new(MF::new(*base_field_element, BF::zero()), MF::zero())
         });
 
         // Define the combine function over EF
@@ -47,7 +44,7 @@ mod fq4_tests {
         // Define the combine function over BF
         let combine_fn_bf: Box<dyn Fn(&Vec<BF>) -> EF + Sync> = Box::new(|data: &Vec<BF>| -> EF {
             let product = data.iter().fold(BF::ONE, |prod, d| prod * d);
-            EF::new(MF::new(product, BF::zero()), MF::zero())
+            EF::from_base_prime_field(product)
         });
 
         // Multiplies a base field element to an extension field element

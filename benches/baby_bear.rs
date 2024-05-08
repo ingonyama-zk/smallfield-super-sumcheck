@@ -6,7 +6,6 @@ extern crate smallfield_sumcheck;
 use std::ops::Range;
 
 use ark_ff::Field;
-use ark_ff::Zero;
 use ark_std::iterable::Iterable;
 use ark_std::vec::Vec;
 use criterion::black_box;
@@ -23,8 +22,11 @@ use smallfield_sumcheck::tests::test_helpers::generate_interpolation_matrix_tran
 use smallfield_sumcheck::tests::test_helpers::get_maps_from_matrix;
 use smallfield_sumcheck::IPForMLSumcheck;
 
-type BF = ark_bls12_381::Fq;
-type EF = ark_bls12_381::Fq2;
+use smallfield_sumcheck::tests::fields::BabyBearFq;
+use smallfield_sumcheck::tests::fields::BabyBearFq4;
+
+type BF = BabyBearFq;
+type EF = BabyBearFq4;
 
 pub fn create_primitive_functions() -> (
     Box<dyn Fn(&BF) -> EF + Sync>,
@@ -36,8 +38,9 @@ pub fn create_primitive_functions() -> (
     Box<dyn Fn(&EF, &EF) -> EF + Sync>,
 ) {
     // Convert a base field element to an extension field element
-    let to_ef: Box<dyn Fn(&BF) -> EF + Sync> =
-        Box::new(|base_field_element: &BF| -> EF { EF::new(*base_field_element, BF::zero()) });
+    let to_ef: Box<dyn Fn(&BF) -> EF + Sync> = Box::new(|base_field_element: &BF| -> EF {
+        EF::from_base_prime_field(*base_field_element)
+    });
 
     // Define the combine function over EF
     let combine_fn_ef: Box<dyn Fn(&Vec<EF>) -> EF + Sync> = Box::new(|data: &Vec<EF>| -> EF {
@@ -48,14 +51,14 @@ pub fn create_primitive_functions() -> (
     // Define the combine function over BF
     let combine_fn_bf: Box<dyn Fn(&Vec<BF>) -> EF + Sync> = Box::new(|data: &Vec<BF>| -> EF {
         let product = data.iter().fold(BF::ONE, |prod, d| prod * d);
-        EF::new(product, BF::zero())
+        EF::from_base_prime_field(product)
     });
 
     // Multiplies a base field element to an extension field element
     let mult_be: Box<dyn Fn(&BF, &EF) -> EF + Sync> = Box::new(
         |base_field_element: &BF, extension_field_element: &EF| -> EF {
             let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
+            result.mul_by_fp(base_field_element);
             result
         },
     );
@@ -215,7 +218,7 @@ pub fn sumcheck_prove_bench(
     for nv in NUM_VARIABLES_RANGE {
         group.significance_level(0.05).sample_size(10);
         let function_name: String = format!(
-            "Algorithm/{:?}/Degree/{}/round_t: {}",
+            "BabyBear/Algorithm/{:?}/Degree/{}/round_t: {}",
             algorithm, degree, round_t
         );
         group.bench_function(BenchmarkId::new(function_name, nv), |b| {
@@ -273,7 +276,7 @@ pub fn sumcheck_prove_bench(
     group.finish();
 }
 
-fn bench_bls_381(c: &mut Criterion) {
+fn bench_baby_bear(c: &mut Criterion) {
     sumcheck_prove_bench(c, 1, 3, AlgorithmType::Naive, false);
     sumcheck_prove_bench(c, 1, 3, AlgorithmType::WitnessChallengeSeparation, false);
     sumcheck_prove_bench(c, 1, 3, AlgorithmType::Precomputation, false);
@@ -307,5 +310,5 @@ fn bench_bls_381(c: &mut Criterion) {
     sumcheck_prove_bench(c, 4, 8, AlgorithmType::ToomCook, false);
 }
 
-criterion_group!(benches, bench_bls_381);
+criterion_group!(benches, bench_baby_bear);
 criterion_main!(benches);
