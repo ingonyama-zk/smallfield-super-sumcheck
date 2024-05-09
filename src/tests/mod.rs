@@ -1,4 +1,7 @@
+mod baby_bear;
 mod bls12_381;
+pub mod fields;
+mod goldilocks;
 
 pub mod test_helpers {
     use ark_ff::{Field, PrimeField};

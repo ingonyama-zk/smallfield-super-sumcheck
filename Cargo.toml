@@ -21,12 +21,17 @@ rand = "0.8"
 merlin = { version = "3.0.0" }
 itertools = "0.12.1"
 nalgebra = { version = "0.32.5" }
-rstest = { version = "0.18.2" }
+rstest = { version = "0.19.0" }
 
 [dev-dependencies]
 criterion = "0.5.1"
 
+# [[bench]]
+# name = "smallfield_sumcheck_bench"
+# path = "benches/bls12_381.rs"
+# harness = false
+
 [[bench]]
-name = "smallfield_sumcheck_bench"
-path = "benches/bls12_381.rs"
+name = "smallfield_sumcheck_babybear_bench"
+path = "benches/baby_bear.rs"
 harness = false
