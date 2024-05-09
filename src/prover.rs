@@ -682,6 +682,19 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // ATTENTION: This is not used in the toom-cook algorithm, it is only required once we switch back to naive algorithm.
         let mut challenge_matrix_polynomial: MatrixPolynomial<EF> = MatrixPolynomial::one();
 
+        // This matrix will store the challenge terms after applying interpolation maps and tensor-hadamard multiplications.
+        //
+        // ⌈ L₀(α₁) ⌉   ⌈ L₀(α₂) ⌉          ⌈ L₀(αₚ) ⌉
+        // | L₁(α₁) |   | L₁(α₂) |          | L₁(αₚ) |
+        // | L₂(α₁) |   | L₂(α₂) |          | L₂(αₚ) |
+        // |  ....  | ⊛ |  ....  | ⊛ .... ⊛ |  ....  |
+        // |  ....  |   |  ....  |          |  ....  |
+        // |  ....  |   |  ....  |          |  ....  |
+        // ⌊ Lₔ(α₁) ⌋   ⌊ Lₔ(α₂) ⌋          ⌊ Lₔ(αₚ) ⌋
+        //
+        let mut interpolated_challenge_matrix_polynomial: MatrixPolynomial<EF> =
+            MatrixPolynomial::one();
+
         // Process first t rounds
         for round_num in 1..=round_t {
             let round_size = num_evals.pow(round_num as u32);
@@ -722,19 +735,19 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                             * precomputed_array_for_this_round[j * num_evals + j_1];
                     }
 
-                    // Extract (j_p, ...., j_2) to perform be multiplications
-                    let mut local_challenge_accumulator = EF::one();
-                    for p in 0..(round_num - 1) {
-                        let j_p = (j / num_evals.pow(p as u32)) % num_evals;
-                        local_challenge_accumulator = mult_ee(
-                            &local_challenge_accumulator,
-                            &challenge_matrix.evaluation_rows[round_num - 2 - (p as usize)][j_p],
-                        );
-                    }
+                    // Fetch the following term using j from the already-computed array
+                    // that contains multiplications of challenge terms.
+                    //
+                    // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
+                    //
+                    // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
+                    //
+                    let local_interpolated_challenge =
+                        interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
 
                     // Accumulate round polynomial evaluation at k
                     round_polynomials[round_num - 1][k as usize] +=
-                        mult_be(&local_witness_accumulator, &local_challenge_accumulator);
+                        mult_be(&local_witness_accumulator, &local_interpolated_challenge);
                 }
             }
 
@@ -752,7 +765,22 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             );
 
             // Update the challenge matrix with the new challenge row
+            // This computes the following terms for the newly computed challenge αᵢ
+            //
+            // [ L₀(αᵢ),  L₁(αᵢ),  L₂(αᵢ), ..., Lₔ(αᵢ) ]
+            //
             challenge_matrix.update_with_challenge(alpha, &interpolation_maps_ef, mult_ee);
+
+            // Update the interpolated challenge matrix with new challenge
+            // This computes the hadamard product of the current matrix with the new challenge column:
+            // [ L₀(αᵢ),  L₁(αᵢ),  L₂(αᵢ), ..., Lₔ(αᵢ) ].
+            //
+            let current_challenge_idx = challenge_matrix.no_of_rows - 1;
+            let current_challenge_row = &challenge_matrix.evaluation_rows[current_challenge_idx];
+            let interpolated_challenge_matrix =
+                MatrixPolynomial::from_evaluations_vec(current_challenge_row);
+            interpolated_challenge_matrix_polynomial = interpolated_challenge_matrix_polynomial
+                .tensor_hadamard_product(&interpolated_challenge_matrix, &mult_ee);
 
             // Update challenge matrix with new challenge
             // TODO: See if we can get rid of the second challenge matrix.

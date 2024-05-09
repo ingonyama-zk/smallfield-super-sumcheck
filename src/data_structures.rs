@@ -302,6 +302,20 @@ impl<F: Field> MatrixPolynomial<F> {
         }
     }
 
+    pub fn from_evaluations_vec(input_vec: &Vec<F>) -> Self {
+        let n = input_vec.len();
+        let mut eval_rows = Vec::with_capacity(n);
+        for i in 0..n {
+            eval_rows.push(vec![input_vec[i]]);
+        }
+
+        MatrixPolynomial {
+            no_of_rows: n,
+            no_of_columns: 1,
+            evaluation_rows: eval_rows,
+        }
+    }
+
     pub fn from_dense_mle(input_polynomial: &DenseMultilinearExtension<F>) -> Self {
         let n = input_polynomial.evaluations.len();
         let mid_point = n / 2;
