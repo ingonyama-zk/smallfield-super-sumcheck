@@ -1,9 +1,10 @@
 #[cfg(test)]
-mod extension_tests {
+mod simple_extension_tests {
     use crate::data_structures::LinearLagrangeList;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::matrix_to_vec_of_vec;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
     use ark_ff::Zero;
@@ -13,6 +14,7 @@ mod extension_tests {
     use ark_std::test_rng;
     use ark_std::vec::Vec;
     use merlin::Transcript;
+    use nalgebra::DMatrix;
 
     type BF = ark_bls12_381::Fq;
     type EF = ark_bls12_381::Fq2;
@@ -461,7 +463,7 @@ mod extension_tests {
 
     /// Converts an interpolation matrix into maps.
     fn get_imaps<FF: Field>(
-        interpolation_matrix: &Vec<Vec<i32>>,
+        interpolation_matrix: &Vec<Vec<i64>>,
     ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
         // Ensure the interpolation matrix is a square matrix.
         let num_evals = interpolation_matrix.len();
@@ -478,9 +480,9 @@ mod extension_tests {
                         .zip(irow_cloned.iter())
                         .fold(FF::zero(), |acc, (value, scalar)| {
                             if *scalar < 0 {
-                                acc - FF::from((*scalar).abs() as u32) * value
+                                acc - FF::from((*scalar).abs() as u64) * value
                             } else {
-                                acc + FF::from((*scalar).abs() as u32) * value
+                                acc + FF::from((*scalar).abs() as u64) * value
                             }
                         })
                 });
@@ -567,18 +569,42 @@ mod extension_tests {
         let projective_map_indices = vec![0 as usize, 3 as usize];
 
         // Define interpolation matrix related maps.
+        /// We have B as the binary expansion matrix.
+        ///     ┌             ┐
+        ///     │  1  0  0  0 │
+        /// B = │ -3  1  0  0 │
+        ///     │  3 -2  1  0 │
+        ///     │ -1  1 -1  1 │
+        ///     └             ┘
+        /// We have P as the interpolation matrix
+        ///           ┌             ┐
+        ///           │  2  0  0  0 │
+        /// P = 1/2 * │  0  1 -1 -2 │
+        ///           │ -2  1  1  0 │
+        ///           │  0  0  0  2 │
+        ///           └             ┘
+        /// The mapping is computed as: M = (B * P)ᵀ
+        ///           ┌                ┐ᵀ        ┌                ┐
+        ///           │  2   0   0   0 │         │  2  -6   4   0 │
+        ///           │ -6   1  -1  -2 │         │  0   1  -1   0 │
+        /// M = 1/2 * │  4  -1   3   4 │ = 1/2 * │  0  -1   3  -2 │
+        ///           │  0   0  -2   0 │         │  0  -2   4   0 │
+        ///           └                ┘         └                ┘
+        ///
         fn get_interpolation_maps<FF: Field>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
             // Define interpolation matrix related maps
-            let imap_1 = Box::new(|v: &Vec<FF>| -> FF { v[0] - v[2] });
+            let imap_1 = Box::new(|v: &Vec<FF>| -> FF {
+                v[0] - FF::from(3 as u32) * v[1] + FF::from(2 as u32) * v[2]
+            });
             let imap_2 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
-                two_inv * (v[2] + v[1])
+                two_inv * (v[1] - v[2])
             });
             let imap_3 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
-                two_inv * (v[2] - v[1])
+                two_inv * (FF::from(3 as u32) * v[2] - v[1]) - v[3]
             });
-            let imap_4 = Box::new(|v: &Vec<FF>| -> FF { v[3] - v[1] });
+            let imap_4 = Box::new(|v: &Vec<FF>| -> FF { FF::from(2 as u32) * v[2] - v[1] });
             let interpolation_maps: Vec<Box<dyn Fn(&Vec<FF>) -> FF>> =
                 vec![imap_1, imap_2, imap_3, imap_4];
             interpolation_maps
@@ -743,27 +769,57 @@ mod extension_tests {
         let projective_map_indices = vec![0 as usize, 4 as usize];
 
         // Define interpolation matrix related maps.
+        /// We have B as the binary expansion matrix.
+        ///     ┌                ┐
+        ///     │  1  0  0  0  0 │
+        ///     │ -4  1  0  0  0 │
+        /// B = │  6 -3  1  0  0 │
+        ///     │ -4  3 -2  1  0 │
+        ///     │  1 -1  1 -1  1 │
+        ///     └                ┘
+        /// We have P as the interpolation matrix
+        ///           ┌                      ┐
+        ///           │   6   0   0   0   0  │
+        ///           │  -3   6  -2  -1  12  │
+        /// P = 1/6 * │  -6   3   3   0  -6  │
+        ///           │   3  -3  -1   1 -12  │
+        ///           │   0   0   0   0   6  │
+        ///           └                      ┘
+        /// The mapping is computed as: M = (B * P)ᵀ
+        ///           ┌                     ┐ᵀ        ┌                     ┐
+        ///           │   6   0   0   0   0 │         │  6 -27  39 -18   0  │
+        ///           │ -27   6  -2  -1  12 │         │  0   6 -15   9   0  │
+        /// M = 1/6 * │  39 -15   9   3 -42 │ = 1/6 * │  0  -2   9 -13   6  │
+        ///           │ -18   9 -13  -2  36 │         │  0  -1   3  -2   0  │
+        ///           │   0   0   6   0   0 │         │  0  12 -42  36   0  │
+        ///           └                     ┘         └                     ┘
+        ///
         fn get_interpolation_maps<FF: Field>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
             // Define interpolation matrix related maps
             let imap_1 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
-                v[0] - v[2] + two_inv * (v[3] - v[1])
+                v[0] - FF::from(3 as u32) * v[3]
+                    + two_inv * (FF::from(13 as u32) * v[2] - FF::from(9 as u32) * v[1])
             });
             let imap_2 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
-                v[1] + two_inv * (v[2] - v[3])
+                v[1] + two_inv * (FF::from(3 as u32) * v[3] - FF::from(5 as u32) * v[2])
             });
             let imap_3 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
                 let three_inv = FF::from(3 as u32).inverse().unwrap();
-                two_inv * v[2] - three_inv * v[1] - (two_inv * three_inv) * v[3]
+                v[4] + two_inv * (FF::from(3 as u32) * v[2])
+                    - three_inv * v[1]
+                    - (two_inv * three_inv) * (FF::from(13 as u32) * v[3])
             });
             let imap_4 = Box::new(|v: &Vec<FF>| -> FF {
-                let six_inv = FF::from(6 as u32).inverse().unwrap();
-                six_inv * (v[3] - v[1])
+                let two_inv = FF::from(2 as u32).inverse().unwrap();
+                let three_inv = FF::from(3 as u32).inverse().unwrap();
+                two_inv * v[2] - (two_inv * three_inv) * v[1] - three_inv * v[3]
             });
-            let imap_5 =
-                Box::new(|v: &Vec<FF>| -> FF { FF::from(2 as u32) * (v[1] - v[3]) + v[4] - v[2] });
+            let imap_5 = Box::new(|v: &Vec<FF>| -> FF {
+                FF::from(2 as u32) * v[1] - FF::from(7 as u32) * v[2] + FF::from(6 as u32) * v[3]
+            });
             let interpolation_maps: Vec<Box<dyn Fn(&Vec<FF>) -> FF>> =
                 vec![imap_1, imap_2, imap_3, imap_4, imap_5];
             interpolation_maps
@@ -948,13 +1004,24 @@ mod extension_tests {
         // △^2 * r_2(x)
         // ...
         let interpolation_matrix = vec![
-            vec![2, 0, -2, 0],
-            vec![0, 1, 1, 0],
-            vec![0, -1, 1, 0],
-            vec![0, -2, 0, 2],
+            vec![2, 0, 0, 0],
+            vec![0, 1, -1, -2],
+            vec![-2, 1, 1, 0],
+            vec![0, 0, 0, 2],
         ];
-        let imaps_base = get_imaps::<BF>(&interpolation_matrix);
-        let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
+        let interpolation_dmatrix = DMatrix::from_row_slice(4, 4, &interpolation_matrix.concat());
+        let binomial_matrix = vec![
+            vec![1, 0, 0, 0],
+            vec![-3, 1, 0, 0],
+            vec![3, -2, 1, 0],
+            vec![-1, 1, -1, 1],
+        ];
+        let binomial_dmatrix = DMatrix::from_row_slice(4, 4, &binomial_matrix.concat());
+        let bin_inter_dmatrix = (binomial_dmatrix * interpolation_dmatrix).transpose();
+        let bin_inter_matrix = matrix_to_vec_of_vec(&bin_inter_dmatrix);
+
+        let imaps_base = get_imaps::<BF>(&bin_inter_matrix);
+        let imaps_ext = get_imaps::<EF>(&bin_inter_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
@@ -1144,14 +1211,26 @@ mod extension_tests {
         // would be different. We can simply adjust the verifier algorithm to take into account the determinant △.
         //
         let interpolation_matrix = vec![
-            vec![6, -3, -6, 3, 0],
-            vec![0, 6, 3, -3, 0],
-            vec![0, -2, 3, -1, 0],
-            vec![0, -1, 0, 1, 0],
-            vec![0, 12, -6, -12, 6],
+            vec![6, 0, 0, 0, 0],
+            vec![-3, 6, -2, -1, 12],
+            vec![-6, 3, 3, 0, -6],
+            vec![3, -3, -1, 1, -12],
+            vec![0, 0, 0, 0, 6],
         ];
-        let imaps_base = get_imaps::<BF>(&interpolation_matrix);
-        let imaps_ext = get_imaps::<EF>(&interpolation_matrix);
+        let interpolation_dmatrix = DMatrix::from_row_slice(5, 5, &interpolation_matrix.concat());
+        let binomial_matrix = vec![
+            vec![1, 0, 0, 0, 0],
+            vec![-4, 1, 0, 0, 0],
+            vec![6, -3, 1, 0, 0],
+            vec![-4, 3, -2, 1, 0],
+            vec![1, -1, 1, -1, 1],
+        ];
+        let binomial_dmatrix = DMatrix::from_row_slice(5, 5, &binomial_matrix.concat());
+        let bin_inter_dmatrix = (binomial_dmatrix * interpolation_dmatrix).transpose();
+        let bin_inter_matrix = matrix_to_vec_of_vec(&bin_inter_dmatrix);
+
+        let imaps_base = get_imaps::<BF>(&bin_inter_matrix);
+        let imaps_ext = get_imaps::<EF>(&bin_inter_matrix);
 
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);

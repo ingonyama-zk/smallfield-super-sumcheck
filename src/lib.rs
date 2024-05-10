@@ -1,9 +1,7 @@
 pub mod data_structures;
 pub mod error;
-mod extension_test;
 mod extension_transcript;
 pub mod prover;
-mod test;
 pub mod tests;
 mod transcript;
 pub mod verifier;
