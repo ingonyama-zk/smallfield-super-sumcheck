@@ -9,21 +9,6 @@ use ark_std::{
 use ark_ff::Field;
 use ark_poly::DenseMultilinearExtension;
 
-/// Computes n!
-fn factorial(n: u64) -> u64 {
-    (1..=n).product()
-}
-
-/// Computes ⁿCᵣ := n! / (r! * (n - r)!)
-fn count_combinations(n: u64, r: u64) -> u64 {
-    factorial(n) / (factorial(r) * factorial(n - r))
-}
-
-/// Computes [ⁿC₀, ⁿC₁, ..., ⁿCₙ]
-fn get_binomial_combinations(n: u64) -> Vec<u64> {
-    (0..n + 1).map(|k| count_combinations(n, k)).collect()
-}
-
 pub fn bit_decompose(input: usize, input_bit_len: usize, slice_len: usize) -> Vec<usize> {
     let max_input = (1 as usize) << input_bit_len;
     assert!(input < max_input);
@@ -607,6 +592,40 @@ impl<F: Field> MatrixPolynomial<F> {
         LinearLagrangeList::<OtherF>::from_vector(&scaled_vec)
     }
 
+    /// Updates the challenge matrix with the terms required for computing round polynomial.
+    /// Here's how it works: given a new challenge r, first we compute
+    ///
+    /// [1, r, r², ..., rᵈ]
+    ///
+    /// This should cost (d - 1) ee multiplications. Next we want to compute:
+    ///
+    /// [řᵈ,  řᵈ⁻¹.r,  řᵈ⁻².r²,  ...,  rᵈ]
+    ///
+    /// We use binomial expansion of řᵐ := (1 - r)ᵐ to compute the above terms without any
+    /// additional ee multiplications (note that we will have constant times extension element).
+    /// Applying a binomial expansion is basically a linear operation and hence we can represent it as
+    /// vector-matrix product (eg d = 4).
+    ///
+    /// [řᵈ,  řᵈ⁻¹.r,  řᵈ⁻².r²,  ...,  rᵈ] = [1, r, r², ..., rᵈ] * ⌈  1  0  0  0  0 ⌉
+    ///                                                            │ -4  1  0  0  0 │
+    ///                                                            │  6 -3  1  0  0 │
+    ///                                                            │ -4  3 -2  1  0 │
+    ///                                                            ⌊  1 -1  1 -1  1 ⌋
+    ///
+    /// Now, we further want to apply interpolation maps on these values. Thus, we need:
+    ///
+    /// [L₀(r), L₁(r), L₂(r), ..., Lₔ(r)] =  [1, r, r², ..., rᵈ] * ⌈  1  0  0  0  0 ⌉   ⌈   6   0   0   0   0 ⌉
+    ///                                                            │ -4  1  0  0  0 │   │  -3  12   6  -2  -1 │
+    ///                                                            │  6 -3  1  0  0 │ * │  -6  -6   3   3   0 │
+    ///                                                            │ -4  3 -2  1  0 │   │   3 -12  -3  -1   1 │
+    ///                                                            ⌊  1 -1  1 -1  1 ⌋   ⌊   0   6   0   0   0 ⌋
+    ///
+    /// Note that we haven't shown the scaling factor (1/6) in the above equation.
+    /// Our idea is to multiply the binomial and interpolation matrices beforehand, and use the
+    /// result of that matrix multiplication (called as combined_binomial_and_interpolation_maps)
+    /// to linearly combine challenge terms. This helps us save multiplications of negative numbers
+    /// (when applying binomial maps) to challenges.
+    ///
     pub fn update_with_challenge<P>(
         &mut self,
         challenge: F,
@@ -627,46 +646,11 @@ impl<F: Field> MatrixPolynomial<F> {
             self.evaluation_rows[rows].push(next_value);
         }
 
-        // Update the powers to:
-        // 0:   ř^{d}
-        // 1:   ř^{d-1} * r
-        // 2:   ř^{d-2} * r^2
-        // 3:   ř^{d-3} * r^3
-        // ...
-        // ...
-        // d-1: ř^{1} * r^{d-1}
-        // d:   r^{d}
-        //
-        // using binomial theorem.
-        let mut updated_row: Vec<F> = Vec::with_capacity(cols);
-        for i in 0..cols {
-            let start_idx: usize = cols - i - 1;
-            let end_idx: usize = cols - 1;
-
-            let combinations = get_binomial_combinations(i as u64);
-            assert_eq!(combinations.len(), i + 1);
-
-            let mut result = F::from(0 as u32);
-            for j in start_idx..=end_idx {
-                let current_value = self.evaluation_rows[rows][j];
-                let is_negative = (j - start_idx) & 1 == 1;
-                if is_negative {
-                    result -= current_value * F::from(combinations[j - start_idx]);
-                } else {
-                    result += current_value * F::from(combinations[j - start_idx]);
-                }
-            }
-            updated_row.push(result);
-        }
-        updated_row.reverse();
-
         // Update the row with interpolation maps
-        let updated_row_clone = updated_row.clone();
+        let original_row_clone = self.evaluation_rows[rows].clone();
         for i in 0..interpolation_maps.len() {
-            updated_row[i] = interpolation_maps[i](&updated_row_clone);
+            self.evaluation_rows[rows][i] = interpolation_maps[i](&original_row_clone);
         }
-
-        self.evaluation_rows[rows] = updated_row;
     }
 }
 
@@ -1190,10 +1174,13 @@ mod test {
             evaluation_rows: Vec::with_capacity(1),
         };
 
+        // Simple map that chooses x[i + 2]
         fn get_projective_imap(index: usize) -> Box<dyn Fn(&Vec<F>) -> F> {
-            Box::new(move |x: &Vec<F>| -> F { x[index].clone() })
+            let col_size = 10;
+            Box::new(move |x: &Vec<F>| -> F { x[(index + 2) % col_size].clone() })
         }
 
+        // Simple permutation map
         let interpolation_maps: Vec<Box<dyn Fn(&Vec<F>) -> F>> =
             (0..col_size).map(|i| get_projective_imap(i)).collect();
 
@@ -1202,19 +1189,14 @@ mod test {
         assert_eq!(sample.no_of_rows, 1);
         assert_eq!(sample.no_of_columns, col_size);
 
-        let scaling_factor: F = (F::ONE - r) * r.inverse().unwrap();
-        let mut r_pow_d = F::ONE;
-        for _ in 1..col_size {
-            r_pow_d *= r;
-        }
-
         let mut multiplicand = F::ONE;
         for i in 0..col_size {
+            let offset = col_size - 2;
             assert_eq!(
-                sample.evaluation_rows[0][col_size - i - 1],
-                multiplicand * r_pow_d
+                sample.evaluation_rows[0][(offset + i) % col_size],
+                multiplicand
             );
-            multiplicand *= scaling_factor;
+            multiplicand *= r;
         }
     }
 }

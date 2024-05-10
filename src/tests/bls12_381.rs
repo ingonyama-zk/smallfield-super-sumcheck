@@ -5,7 +5,7 @@ mod fq2_tests {
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_interpolation_matrix_transpose;
+    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
     use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -158,7 +158,8 @@ mod fq2_tests {
         let projective_map_indices = vec![0 as usize, 1 as usize];
 
         // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) = generate_interpolation_matrix_transpose(degree);
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
 
         // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
         let mut divisor: i64 = 1;
@@ -257,7 +258,7 @@ mod fq6_tests {
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_interpolation_matrix_transpose;
+    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
     use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -415,7 +416,8 @@ mod fq6_tests {
         let projective_map_indices = vec![0 as usize, 1 as usize];
 
         // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) = generate_interpolation_matrix_transpose(degree);
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
 
         // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
         let mut divisor: i64 = 1;
@@ -514,7 +516,7 @@ mod fq12_tests {
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_interpolation_matrix_transpose;
+    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
     use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -683,7 +685,8 @@ mod fq12_tests {
         let projective_map_indices = vec![0 as usize, 1 as usize];
 
         // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) = generate_interpolation_matrix_transpose(degree);
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
 
         // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
         let mut divisor: i64 = 1;

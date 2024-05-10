@@ -46,6 +46,53 @@ pub mod test_helpers {
         (prover_state, claimed_sum)
     }
 
+    /// Computes n!
+    pub fn factorial(n: u64) -> u64 {
+        (1..=n).product()
+    }
+
+    /// Computes ⁿCᵣ := n! / (r! * (n - r)!)
+    pub fn count_combinations(n: u64, r: u64) -> u64 {
+        factorial(n) / (factorial(r) * factorial(n - r))
+    }
+
+    /// Computes [ⁿC₀, ⁿC₁, ..., ⁿCₙ]
+    pub fn get_binomial_combinations(n: u64) -> Vec<u64> {
+        (0..n + 1).map(|k| count_combinations(n, k)).collect()
+    }
+
+    /// Generate binomial expansion matrix
+    pub fn generate_binomial_expansion_matrix(degree: usize) -> DMatrix<i64> {
+        let num_evals = degree + 1;
+        let nrows = num_evals;
+        let ncols = num_evals;
+
+        let mut data: Vec<i64> = Vec::with_capacity(nrows * ncols);
+        for i in (0..=degree).rev() {
+            let combinations = get_binomial_combinations(i as u64);
+            let signed_combinations: Vec<i64> = combinations
+                .iter()
+                .enumerate()
+                .map(|(index, &value)| {
+                    if index % 2 == 0 {
+                        value as i64
+                    } else {
+                        -(value as i64)
+                    }
+                })
+                .collect();
+
+            let mut modified_signed_combinations: Vec<i64> = Vec::with_capacity(num_evals);
+            modified_signed_combinations.resize(num_evals - signed_combinations.len(), 0);
+            modified_signed_combinations.extend(signed_combinations.clone());
+
+            data.extend(modified_signed_combinations);
+        }
+
+        let dmatrix = DMatrix::from_row_slice(nrows, ncols, &data);
+        dmatrix.transpose()
+    }
+
     // Helper function to generate evaluation matrix for Toom-Cook algorithm.
     pub fn generate_evaluation_matrix(degree: usize) -> Vec<Vec<i64>> {
         let num_evals = degree + 1;
@@ -160,6 +207,17 @@ pub mod test_helpers {
         )
     }
 
+    pub fn generate_binomial_interpolation_mult_matrix_transpose(
+        degree: usize,
+    ) -> (Vec<Vec<i64>>, i64) {
+        let (inter_matrix, scaled_det) = generate_interpolation_matrix_transpose(degree);
+        let inter_dmatrix = vec_of_vec_to_matrix(&inter_matrix).transpose();
+        let binomial_dmatrix = generate_binomial_expansion_matrix(degree);
+        let mult_dmatrix = (binomial_dmatrix * inter_dmatrix).transpose();
+
+        (matrix_to_vec_of_vec(&mult_dmatrix), scaled_det)
+    }
+
     // Finds the value with second highest magnitude in a matrix.
     pub fn second_highest_magnitude(matrix: &DMatrix<i64>) -> i64 {
         let mut values: Vec<i64> = matrix.iter().cloned().collect();
@@ -208,8 +266,10 @@ pub mod test_helpers {
 #[cfg(test)]
 mod test {
     use nalgebra::DMatrix;
+    use rand::Rng;
 
     use crate::tests::test_helpers::{
+        generate_binomial_expansion_matrix, generate_binomial_interpolation_mult_matrix_transpose,
         generate_evaluation_matrix, generate_interpolation_matrix_transpose, vec_of_vec_to_matrix,
     };
 
@@ -223,6 +283,29 @@ mod test {
             let i_dmatrix = vec_of_vec_to_matrix(&imatrix);
             let multplication = (eval_dmatrix * i_dmatrix.transpose()) / scaled_det;
             assert_eq!(multplication, DMatrix::identity(j + 1, j + 1));
+        }
+    }
+
+    #[test]
+    fn test_binomial_matrix() {
+        for j in (1 as u32)..7 {
+            let binomial_dmatrix = generate_binomial_expansion_matrix(j as usize);
+            let mut rng = rand::thread_rng();
+            let r_value: u8 = rng.gen();
+            let mut r_powers = vec![1 as i64];
+            for k in 1..=j {
+                r_powers.push(r_powers[k as usize - 1] * (r_value as i64));
+            }
+            let r_powers_dmatrix = DMatrix::from_row_slice(1, (j + 1) as usize, &r_powers);
+            let r_evals = r_powers_dmatrix * binomial_dmatrix;
+
+            for l in 0..=(j as u32) {
+                let r_bar = 1 as i64 - r_value as i64;
+                let r_bar_pow = r_bar.pow((j - l) as u32);
+                let r_pow = (r_value as i64).pow(l);
+                let expected: i64 = r_bar_pow * r_pow;
+                assert_eq!(r_evals[l as usize], expected);
+            }
         }
     }
 }
