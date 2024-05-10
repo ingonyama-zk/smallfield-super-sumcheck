@@ -2,6 +2,7 @@ mod baby_bear;
 mod bls12_381;
 pub mod fields;
 mod goldilocks;
+mod simple_tests;
 
 pub mod test_helpers {
     use ark_ff::{Field, PrimeField};
@@ -269,8 +270,8 @@ mod test {
     use rand::Rng;
 
     use crate::tests::test_helpers::{
-        generate_binomial_expansion_matrix, generate_binomial_interpolation_mult_matrix_transpose,
-        generate_evaluation_matrix, generate_interpolation_matrix_transpose, vec_of_vec_to_matrix,
+        generate_binomial_expansion_matrix, generate_evaluation_matrix,
+        generate_interpolation_matrix_transpose, vec_of_vec_to_matrix,
     };
 
     #[test]

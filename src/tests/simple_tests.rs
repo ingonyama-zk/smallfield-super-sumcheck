@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod extension_tests {
+mod simple_extension_tests {
     use crate::data_structures::LinearLagrangeList;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
