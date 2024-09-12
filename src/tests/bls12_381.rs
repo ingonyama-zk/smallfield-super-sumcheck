@@ -9,12 +9,40 @@ mod fq_tests {
     use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
+    use ark_ff::BigInt;
     use ark_ff::Field;
     use ark_std::iterable::Iterable;
     use ark_std::vec::Vec;
     use merlin::Transcript;
     use rstest::rstest;
     // use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Define a global atomic counter
+    static BB_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    // Define a function to get the current call count
+    pub fn get_bb_count() -> usize {
+        BB_COUNT.load(Ordering::SeqCst)
+    }
+
+    // Define a global atomic counter
+    static BE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    // Define a function to get the current call count
+    pub fn get_be_count() -> usize {
+        BE_COUNT.load(Ordering::SeqCst)
+    }
+
+    // Define a global atomic counter
+    static EE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    // Define a function to get the current call count
+    pub fn get_ee_count() -> usize {
+        EE_COUNT.load(Ordering::SeqCst)
+    }
 
     type BF = ark_bls12_381::Fq;
     type EF = ark_bls12_381::Fq;
@@ -47,17 +75,31 @@ mod fq_tests {
         // Multiplies a base field element to an extension field element
         let mult_be: Box<dyn Fn(&BF, &EF) -> EF + Sync> = Box::new(
             |base_field_element: &BF, extension_field_element: &EF| -> EF {
+                // Increment the counter
+                BE_COUNT.fetch_add(1, Ordering::SeqCst);
                 extension_field_element * base_field_element
             },
         );
 
         // Multiplies an extension field element to an extension field element
         let mult_ee: Box<dyn Fn(&EF, &EF) -> EF + Sync> =
-            Box::new(|ee_element1: &EF, ee_element2: &EF| -> EF { ee_element1 * ee_element2 });
+            Box::new(|ee_element1: &EF, ee_element2: &EF| -> EF {
+                // Increment the counter
+                EE_COUNT.fetch_add(1, Ordering::SeqCst);
+                ee_element1 * ee_element2
+            });
 
         // Multiplies a base field element to a base field element
         let mult_bb: Box<dyn Fn(&BF, &BF) -> BF + Sync> =
-            Box::new(|bb_element1: &BF, bb_element2: &BF| -> BF { bb_element1 * bb_element2 });
+            Box::new(|bb_element1: &BF, bb_element2: &BF| -> BF {
+                // Increment the counter
+                BB_COUNT.fetch_add(1, Ordering::SeqCst);
+                let int_1: u64 = bb_element1.0 .0[0];
+                let int_2: u64 = bb_element2.0 .0[0];
+                let and_result = int_1 & int_2;
+                let bf_and_result = BF::from(and_result as u64);
+                bf_and_result
+            });
 
         // Adds two extension field elements
         let add_ee: Box<dyn Fn(&EF, &EF) -> EF + Sync> =
@@ -107,6 +149,10 @@ mod fq_tests {
             Some(&imaps_base),
             Some(&imaps_ext),
         );
+
+        println!("mult_bb was called {} times", get_bb_count());
+        println!("mult_be was called {} times", get_be_count());
+        println!("mult_ee was called {} times", get_ee_count());
 
         let mut round_t_v = round_t;
         if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
@@ -183,11 +229,10 @@ mod fq_tests {
         let degree = 4; // You can adjust this value if needed
         let algorithm = AlgorithmType::Precomputation;
 
-        flame::start("profile_sumcheck_test_helper");
-        sumcheck_test_helper(nv, degree, 4, algorithm, false)
-            .1
-            .unwrap();
-        flame::end("profile_sumcheck_test_helper");
+        let start = Instant::now();
+        sumcheck_test_helper(nv, degree, 4, algorithm, false);
+        let duration = start.elapsed();
+        println!("sumcheck_test_helper: {:?}", duration);
     }
 
     #[rstest]

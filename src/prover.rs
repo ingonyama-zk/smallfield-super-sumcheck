@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::{
     data_structures::{bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial},
     extension_transcript::ExtensionTranscriptProtocol,
@@ -380,7 +382,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
-        flame::start("algo3");
+        let start = Instant::now();
 
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
@@ -404,7 +406,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             ));
         }
 
-        flame::start("bb_mults");
+        let start_bb = Instant::now();
 
         // Pre-compute bb multiplications upto round t
         // For this, we first fold the witness matrices to get their dimension: 2^t  x  (N / 2^t)
@@ -420,7 +422,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             (1 as usize) << (round_t * r_degree)
         );
 
-        flame::end("bb_mults");
+        let elapsed_bb = start_bb.elapsed();
+        println!("bb_mults: {:?}", elapsed_bb);
 
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ] L_1
@@ -449,17 +452,20 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 }
             }
 
-            flame::start("ee_mults_tensor");
+            println!("round {}:", round_num);
+            let start_ee_tensor = Instant::now();
+
             // Compute challenge terms for 2^{r * d - 1} terms
             let mut gamma_matrix = challenge_matrix_polynomial.clone();
             for _ in 1..r_degree {
                 gamma_matrix =
                     gamma_matrix.tensor_hadamard_product(&challenge_matrix_polynomial, &mult_ee);
             }
-            flame::end("ee_mults_tensor");
+            let elapsed_ee_tensor = start_ee_tensor.elapsed();
+            println!("   ee_tensor: {:?}", elapsed_ee_tensor);
 
             // be mults start
-            flame::start("be_mults");
+            let start_be = Instant::now();
             // Combine precomputed_array_for_this_round[i] and precomputed_array_for_this_round[i + 1]
             // substituting X = k.
             for k in 0..(r_degree + 1) as u64 {
@@ -505,9 +511,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
             }
-            flame::end("be_mults");
+            let elapsed_be = start_be.elapsed();
+            println!("   be_mults: {:?}", elapsed_be);
 
-            flame::start("alpha");
+            let start_alpha = Instant::now();
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
@@ -520,19 +527,24 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 transcript,
                 b"challenge_nextround",
             );
-            flame::end("alpha");
+            let elapsed_alpha = start_alpha.elapsed();
+            println!("   alpha: {:?}", elapsed_alpha);
 
             // Update challenge matrix with new challenge
-            flame::start("ee_mults");
+            let start_ee = Instant::now();
             let challenge_tuple =
                 DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
-            flame::end("ee_mults");
+            let elapsed_ee = start_ee.elapsed();
+            println!("   ee_mults: {:?}", elapsed_ee);
+            println!("   no_rows = {}", challenge_matrix_polynomial.no_of_rows);
+            println!("   no_cols = {}", challenge_matrix_polynomial.no_of_columns);
         }
 
-        flame::end("algo3");
+        let duration = start.elapsed();
+        println!("prove_with_precomputation_agorithm: {:?}", duration);
 
         // // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
         // // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
