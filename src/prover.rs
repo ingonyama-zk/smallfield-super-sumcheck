@@ -7,6 +7,7 @@ use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use ark_std::{log2, vec::Vec};
 use merlin::Transcript;
+extern crate flame;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -176,7 +177,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
 
         // Phase 2: Process the subsequent rounds with only ee multiplications.
-        for round_number in 2..=prover_state.num_vars {
+        // TODO: hardcoding till round 4
+        for round_number in 2..=5 {
             let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_number,
                 &ef_state_polynomials,
@@ -378,6 +380,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
+        flame::start("algo3");
+
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
         // Round 1:
@@ -400,6 +404,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             ));
         }
 
+        flame::start("bb_mults");
+
         // Pre-compute bb multiplications upto round t
         // For this, we first fold the witness matrices to get their dimension: 2^t  x  (N / 2^t)
         for _ in 2..=round_t {
@@ -414,12 +420,16 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             (1 as usize) << (round_t * r_degree)
         );
 
+        flame::end("bb_mults");
+
         // This matrix will store challenges in the form:
-        // [ (1-α_1)(1-α_2)...(1-α_m) ]
-        // [ (1-α_1)(1-α_2)...(α_m) ]
+        // [ (1-α_1)(1-α_2)...(1-α_m) ] L_1
+        // [ (1-α_1)(1-α_2)...(α_m) ]   L_2
         // [ .. ]
         // [ .. ]
-        // [ (α_1)(α_2)...(α_m) ]
+        // [ (α_1)(α_2)...(α_m) ]       L_M
+        //
+        // L_1 * L_2 * ... * L_M
         let mut challenge_matrix_polynomial: MatrixPolynomial<EF> = MatrixPolynomial::one();
 
         let two_power_t = (1 as usize) << round_t;
@@ -439,13 +449,17 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 }
             }
 
+            flame::start("ee_mults_tensor");
             // Compute challenge terms for 2^{r * d - 1} terms
             let mut gamma_matrix = challenge_matrix_polynomial.clone();
             for _ in 1..r_degree {
                 gamma_matrix =
                     gamma_matrix.tensor_hadamard_product(&challenge_matrix_polynomial, &mult_ee);
             }
+            flame::end("ee_mults_tensor");
 
+            // be mults start
+            flame::start("be_mults");
             // Combine precomputed_array_for_this_round[i] and precomputed_array_for_this_round[i + 1]
             // substituting X = k.
             for k in 0..(r_degree + 1) as u64 {
@@ -491,7 +505,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
             }
+            flame::end("be_mults");
 
+            flame::start("alpha");
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
@@ -504,39 +520,44 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 transcript,
                 b"challenge_nextround",
             );
+            flame::end("alpha");
 
             // Update challenge matrix with new challenge
+            flame::start("ee_mults");
             let challenge_tuple =
                 DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
+            flame::end("ee_mults");
         }
 
-        // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
-        // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
-        // for each witness polynomial p_i.
-        let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
-            .iter()
-            .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
-            .collect();
+        flame::end("algo3");
 
-        // Process remaining rounds by switching to Algorithm 1
-        for round_num in (round_t + 1)..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<EC, EF>(
-                round_num,
-                &ef_state_polynomials,
-                round_polynomials,
-                r_degree,
-                &ef_combine_function,
-                transcript,
-            );
+        // // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
+        // // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
+        // // for each witness polynomial p_i.
+        // let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
+        //     .iter()
+        //     .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
+        //     .collect();
 
-            // update the state polynomials
-            for j in 0..ef_state_polynomials.len() {
-                ef_state_polynomials[j].fold_in_half(alpha);
-            }
-        }
+        // // Process remaining rounds by switching to Algorithm 1
+        // for round_num in (round_t + 1)..=prover_state.num_vars {
+        //     let alpha = Self::compute_round_polynomial::<EC, EF>(
+        //         round_num,
+        //         &ef_state_polynomials,
+        //         round_polynomials,
+        //         r_degree,
+        //         &ef_combine_function,
+        //         transcript,
+        //     );
+
+        //     // update the state polynomials
+        //     for j in 0..ef_state_polynomials.len() {
+        //         ef_state_polynomials[j].fold_in_half(alpha);
+        //     }
+        // }
     }
 
     /// Algorithm 4
@@ -559,6 +580,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
+        flame::start("prove_toom_cook");
+
         // Assertions
         assert_eq!(projection_mapping_indices.len(), 2);
 
@@ -587,6 +610,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             ));
         }
 
+        flame::start("precompute");
         // Pre-compute bb multiplications upto round t
         // For this, we first fold the witness matrices to get their dimension: 2^t  x  2^{l - t}
         // Lets say t = 2 and d = 3. We want to pre-compute the terms:
@@ -666,6 +690,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             projection_mapping_indices,
         );
 
+        flame::end("precompute");
+
         // Initialise empty challenge matrix
         let mut challenge_matrix: MatrixPolynomial<EF> = MatrixPolynomial::<EF> {
             no_of_rows: 0,
@@ -695,6 +721,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let mut interpolated_challenge_matrix_polynomial: MatrixPolynomial<EF> =
             MatrixPolynomial::one();
 
+        flame::start("init_rounds");
         // Process first t rounds
         for round_num in 1..=round_t {
             let round_size = num_evals.pow(round_num as u32);
@@ -791,30 +818,36 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
         }
 
-        // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
-        // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
-        // for each witness polynomial p_i.
-        let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
-            .iter()
-            .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
-            .collect();
+        flame::end("init_rounds");
+        flame::start("last_rounds_naive");
 
-        // Process remaining rounds by switching to Algorithm 1
-        for round_num in (round_t + 1)..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<EC, EF>(
-                round_num,
-                &ef_state_polynomials,
-                round_polynomials,
-                r_degree,
-                &ef_combine_function,
-                transcript,
-            );
+        // // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
+        // // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
+        // // for each witness polynomial p_i.
+        // let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
+        //     .iter()
+        //     .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
+        //     .collect();
 
-            // update the state polynomials
-            for j in 0..ef_state_polynomials.len() {
-                ef_state_polynomials[j].fold_in_half(alpha);
-            }
-        }
+        // // Process remaining rounds by switching to Algorithm 1
+        // for round_num in (round_t + 1)..=prover_state.num_vars {
+        //     let alpha = Self::compute_round_polynomial::<EC, EF>(
+        //         round_num,
+        //         &ef_state_polynomials,
+        //         round_polynomials,
+        //         r_degree,
+        //         &ef_combine_function,
+        //         transcript,
+        //     );
+
+        //     // update the state polynomials
+        //     for j in 0..ef_state_polynomials.len() {
+        //         ef_state_polynomials[j].fold_in_half(alpha);
+        //     }
+        // }
+        flame::end("last_rounds_naive");
+
+        flame::end("prove_toom_cook");
     }
 
     ///
@@ -849,6 +882,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
+        flame::start("main_prove");
+
         // Initiate the transcript with the protocol name
         <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
@@ -924,6 +959,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_combine_function,
             ),
         }
+
+        flame::end("main_prove");
 
         SumcheckProof {
             num_vars: prover_state.num_vars,

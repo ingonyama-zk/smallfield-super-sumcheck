@@ -22,6 +22,7 @@ merlin = { version = "3.0.0" }
 itertools = "0.13.0"
 nalgebra = { version = "0.32.5" }
 rstest = { version = "0.19.0" }
+flame = "0.2"
 
 [dev-dependencies]
 criterion = "0.5.1"
@@ -45,3 +46,6 @@ harness = false
 # name = "babybear_primitives_bench"
 # path = "benches/baby_bear_primitives.rs"
 # harness = false
+
+[profile.release]
+debug = 1

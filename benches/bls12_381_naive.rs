@@ -203,7 +203,7 @@ pub struct ProverInputs {
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
 }
 
-const NUM_VARIABLES_RANGE: Range<usize> = 16..18;
+const NUM_VARIABLES_RANGE: Range<usize> = 12..13;
 
 pub fn sumcheck_prove_bench(
     c: &mut Criterion,
@@ -286,14 +286,14 @@ fn bench_bls_381_naive(c: &mut Criterion) {
 
     // Test with u8
     sumcheck_prove_bench(c, 4, 4, AlgorithmType::Naive, WitnessType::U1, false);
-    sumcheck_prove_bench(
-        c,
-        4,
-        4,
-        AlgorithmType::WitnessChallengeSeparation,
-        WitnessType::U1,
-        false,
-    );
+    // sumcheck_prove_bench(
+    //     c,
+    //     4,
+    //     4,
+    //     AlgorithmType::WitnessChallengeSeparation,
+    //     WitnessType::U1,
+    //     false,
+    // );
     sumcheck_prove_bench(
         c,
         4,
