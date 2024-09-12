@@ -23,11 +23,8 @@ use smallfield_sumcheck::tests::test_helpers::get_maps_from_matrix;
 use smallfield_sumcheck::tests::test_helpers::WitnessType;
 use smallfield_sumcheck::IPForMLSumcheck;
 
-use smallfield_sumcheck::tests::fields::BabyBearFq;
-use smallfield_sumcheck::tests::fields::BabyBearFq4;
-
-type BF = BabyBearFq;
-type EF = BabyBearFq4;
+type BF = ark_bls12_381::Fq;
+type EF = ark_bls12_381::Fq;
 
 pub fn create_primitive_functions() -> (
     Box<dyn Fn(&BF) -> EF + Sync>,
@@ -39,9 +36,8 @@ pub fn create_primitive_functions() -> (
     Box<dyn Fn(&EF, &EF) -> EF + Sync>,
 ) {
     // Convert a base field element to an extension field element
-    let to_ef: Box<dyn Fn(&BF) -> EF + Sync> = Box::new(|base_field_element: &BF| -> EF {
-        EF::from_base_prime_field(*base_field_element)
-    });
+    let to_ef: Box<dyn Fn(&BF) -> EF + Sync> =
+        Box::new(|base_field_element: &BF| -> EF { *base_field_element });
 
     // Define the combine function over EF
     let combine_fn_ef: Box<dyn Fn(&Vec<EF>) -> EF + Sync> = Box::new(|data: &Vec<EF>| -> EF {
@@ -52,14 +48,14 @@ pub fn create_primitive_functions() -> (
     // Define the combine function over BF
     let combine_fn_bf: Box<dyn Fn(&Vec<BF>) -> EF + Sync> = Box::new(|data: &Vec<BF>| -> EF {
         let product = data.iter().fold(BF::ONE, |prod, d| prod * d);
-        EF::from_base_prime_field(product)
+        product
     });
 
     // Multiplies a base field element to an extension field element
     let mult_be: Box<dyn Fn(&BF, &EF) -> EF + Sync> = Box::new(
         |base_field_element: &BF, extension_field_element: &EF| -> EF {
             let mut result: EF = EF::from(*extension_field_element);
-            result.mul_by_fp(base_field_element);
+            result = result * base_field_element;
             result
         },
     );
@@ -207,21 +203,22 @@ pub struct ProverInputs {
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
 }
 
-const NUM_VARIABLES_RANGE: Range<usize> = 10..21;
+const NUM_VARIABLES_RANGE: Range<usize> = 16..18;
 
 pub fn sumcheck_prove_bench(
     c: &mut Criterion,
     degree: usize,
     round_t: usize,
     algorithm: AlgorithmType,
+    witness_type: WitnessType,
     with_inversions: bool,
 ) {
     let mut group = c.benchmark_group("Prove");
     for nv in NUM_VARIABLES_RANGE {
         group.significance_level(0.05).sample_size(10);
         let function_name: String = format!(
-            "BabyBear/Algorithm/{:?}/Degree/{}/round_t: {}",
-            algorithm, degree, round_t
+            "Algorithm/{:?}/Degree/{}/Witness/{:?}/round_t: {}",
+            algorithm, degree, witness_type, round_t
         );
         group.bench_function(BenchmarkId::new(function_name, nv), |b| {
             b.iter_batched_ref(
@@ -230,12 +227,7 @@ pub fn sumcheck_prove_bench(
                         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
                             create_primitive_functions();
                         let (prover_state, _): (ProverState<EF, BF>, BF) =
-                            create_sumcheck_test_data(
-                                nv,
-                                degree,
-                                algorithm.clone(),
-                                WitnessType::FIELD,
-                            );
+                            create_sumcheck_test_data(nv, degree, algorithm.clone(), witness_type);
                         let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, _) =
                             setup_for_toom_cook(degree, with_inversions);
                         let prover_transcript = Transcript::new(b"bench_sumcheck");
@@ -283,39 +275,74 @@ pub fn sumcheck_prove_bench(
     group.finish();
 }
 
-fn bench_baby_bear(c: &mut Criterion) {
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Naive, false);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::WitnessChallengeSeparation, false);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::ToomCook, false);
+fn bench_bls_381_naive(c: &mut Criterion) {
+    // sumcheck_prove_bench(c, 1, 3, AlgorithmType::Naive, false);
+    // sumcheck_prove_bench(c, 1, 3, AlgorithmType::WitnessChallengeSeparation, false);
+    // sumcheck_prove_bench(c, 1, 3, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 1, 3, AlgorithmType::ToomCook, false);
 
-    sumcheck_prove_bench(c, 1, 8, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 1, 8, AlgorithmType::ToomCook, false);
+    // sumcheck_prove_bench(c, 1, 8, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 1, 8, AlgorithmType::ToomCook, false);
 
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Naive, false);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::WitnessChallengeSeparation, false);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::ToomCook, false);
+    // Test with u8
+    sumcheck_prove_bench(c, 4, 4, AlgorithmType::Naive, WitnessType::U1, false);
+    sumcheck_prove_bench(
+        c,
+        4,
+        4,
+        AlgorithmType::WitnessChallengeSeparation,
+        WitnessType::U1,
+        false,
+    );
+    sumcheck_prove_bench(
+        c,
+        4,
+        4,
+        AlgorithmType::Precomputation,
+        WitnessType::U1,
+        false,
+    );
+    sumcheck_prove_bench(c, 4, 4, AlgorithmType::ToomCook, WitnessType::U1, false);
 
-    sumcheck_prove_bench(c, 2, 8, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 2, 8, AlgorithmType::ToomCook, false);
+    // // Bench with field
+    // sumcheck_prove_bench(c, 4, 4, AlgorithmType::Naive, WitnessType::FIELD, false);
+    // sumcheck_prove_bench(
+    //     c,
+    //     4,
+    //     4,
+    //     AlgorithmType::WitnessChallengeSeparation,
+    //     WitnessType::FIELD,
+    //     false,
+    // );
+    // sumcheck_prove_bench(
+    //     c,
+    //     4,
+    //     4,
+    //     AlgorithmType::Precomputation,
+    //     WitnessType::FIELD,
+    //     false,
+    // );
+    // sumcheck_prove_bench(c, 4, 4, AlgorithmType::ToomCook, WitnessType::FIELD, false);
 
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Naive, false);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::WitnessChallengeSeparation, false);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::ToomCook, false);
+    // sumcheck_prove_bench(c, 2, 8, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 2, 8, AlgorithmType::ToomCook, false);
 
-    sumcheck_prove_bench(c, 3, 8, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 3, 8, AlgorithmType::ToomCook, false);
+    // sumcheck_prove_bench(c, 3, 3, AlgorithmType::Naive, false);
+    // sumcheck_prove_bench(c, 3, 3, AlgorithmType::WitnessChallengeSeparation, false);
+    // sumcheck_prove_bench(c, 3, 3, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 3, 3, AlgorithmType::ToomCook, false);
 
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Naive, false);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::WitnessChallengeSeparation, false);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::ToomCook, false);
+    // sumcheck_prove_bench(c, 3, 8, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 3, 8, AlgorithmType::ToomCook, false);
 
-    sumcheck_prove_bench(c, 4, 8, AlgorithmType::Precomputation, false);
-    sumcheck_prove_bench(c, 4, 8, AlgorithmType::ToomCook, false);
+    // sumcheck_prove_bench(c, 4, 3, AlgorithmType::Naive, false);
+    // sumcheck_prove_bench(c, 4, 3, AlgorithmType::WitnessChallengeSeparation, false);
+    // sumcheck_prove_bench(c, 4, 3, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 4, 3, AlgorithmType::ToomCook, false);
+
+    // sumcheck_prove_bench(c, 4, 8, AlgorithmType::Precomputation, false);
+    // sumcheck_prove_bench(c, 4, 8, AlgorithmType::ToomCook, false);
 }
 
-criterion_group!(benches, bench_baby_bear);
+criterion_group!(benches, bench_bls_381_naive);
 criterion_main!(benches);

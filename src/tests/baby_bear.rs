@@ -7,7 +7,9 @@ mod fq4_tests {
     use crate::tests::test_helpers::create_sumcheck_test_data;
     use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
     use crate::tests::test_helpers::get_maps_from_matrix;
+    use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
+    use std::time::Instant;
 
     use ark_ff::Field;
     use ark_std::iterable::Iterable;
@@ -89,13 +91,14 @@ mod fq4_tests {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone());
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::FIELD);
 
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             setup_for_toom_cook(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
+        let start = Instant::now();
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_ef,
@@ -111,6 +114,18 @@ mod fq4_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+        );
+        // Measure elapsed time
+        let duration = start.elapsed();
+
+        // Print elapsed time in milliseconds
+        println!(
+            "\nalgorithm = {}, d = {}, n = {}, t = {}, runtime = {} ms\n",
+            algorithm.clone() as u32,
+            degree,
+            nv,
+            round_t,
+            duration.as_millis()
         );
 
         let mut round_t_v = round_t;
@@ -180,6 +195,28 @@ mod fq4_tests {
             imaps_ext,
             scaled_det,
         )
+    }
+
+    #[rstest]
+    fn check_runtimes(
+        #[values(8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)] nv: usize,
+        #[values(4)] degree: usize,
+        #[values(6)] round_t: usize,
+        #[values(
+            AlgorithmType::Naive,
+            AlgorithmType::WitnessChallengeSeparation,
+            AlgorithmType::Precomputation,
+            AlgorithmType::ToomCook
+        )]
+        algorithm: AlgorithmType,
+    ) {
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(nv, degree, round_t, algorithm, false)
+                .1
+                .unwrap(),
+            true
+        );
     }
 
     #[rstest]

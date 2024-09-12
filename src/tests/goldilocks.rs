@@ -7,6 +7,7 @@ mod fq2_tests {
     use crate::tests::test_helpers::create_sumcheck_test_data;
     use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
     use crate::tests::test_helpers::get_maps_from_matrix;
+    use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
 
     use ark_ff::{Field, Zero};
@@ -88,7 +89,7 @@ mod fq2_tests {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone());
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::FIELD);
 
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             setup_for_toom_cook(degree, with_inversions);
@@ -160,7 +161,8 @@ mod fq2_tests {
         let projective_map_indices = vec![0 as usize, 1 as usize];
 
         // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) = generate_binomial_interpolation_mult_matrix_transpose(degree);
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
 
         // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
         let mut divisor: i64 = 1;
