@@ -1,4 +1,10 @@
-use std::vec;
+use std::{
+    ops::{Add, AddAssign, Mul, Sub},
+    vec,
+};
+
+use num::One;
+use num::Zero;
 
 use ark_std::{
     fmt::{self, Formatter},
@@ -165,6 +171,22 @@ impl<F: Field> LinearLagrangeList<F> {
         }
     }
 
+    pub fn to_vector(&self) -> Vec<F> {
+        // Allocate space for the output vector
+        let mut vec = Vec::with_capacity(self.size * 2);
+
+        // First, extract the `even` elements
+        for poly in &self.list {
+            vec.push(poly.even.clone());
+        }
+
+        // Then, extract the `odd` elements
+        for poly in &self.list {
+            vec.push(poly.odd.clone());
+        }
+        vec
+    }
+
     pub fn convert<OtherF, T>(self: &LinearLagrangeList<F>, to_ef: &T) -> LinearLagrangeList<OtherF>
     where
         OtherF: Field,
@@ -268,6 +290,92 @@ pub struct MatrixPolynomial<F: Field> {
     pub no_of_rows: usize,
     pub no_of_columns: usize,
     pub evaluation_rows: Vec<Vec<F>>,
+}
+
+///
+/// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix (integer) form.
+///
+#[derive(Clone, PartialEq, Eq)]
+pub struct MatrixPolynomialInt<T> {
+    pub no_of_rows: usize,
+    pub no_of_columns: usize,
+    pub evaluation_rows: Vec<Vec<T>>,
+}
+
+impl<T> MatrixPolynomialInt<T>
+where
+    T: Clone
+        + Add<Output = T>
+        + Mul<Output = T>
+        + AddAssign
+        + Sub<Output = T>
+        + Zero
+        + One
+        + Send
+        + Sync,
+{
+    pub fn from_evaluations(input_polynomial: &Vec<T>) -> Self {
+        let n = input_polynomial.len();
+        let mid_point = n / 2;
+        let (first_half, second_half) = input_polynomial.split_at(mid_point);
+
+        MatrixPolynomialInt {
+            no_of_rows: 2,
+            no_of_columns: mid_point,
+            evaluation_rows: vec![first_half.to_vec(), second_half.to_vec()],
+        }
+    }
+
+    pub fn heighten(&mut self) {
+        // Update the dimensions of the original matrix
+        self.no_of_rows *= 2;
+        self.no_of_columns /= 2;
+        let mid_point = self.no_of_columns;
+        let end_point = mid_point * 2;
+
+        for row_index in 0..(self.no_of_rows / 2) {
+            let vector_to_add = self.evaluation_rows[2 * row_index][mid_point..end_point].to_vec();
+            self.evaluation_rows
+                .insert(2 * row_index + 1, vector_to_add);
+            self.evaluation_rows[2 * row_index].truncate(mid_point);
+        }
+    }
+
+    pub fn tensor_inner_product(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<T> {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        let log_row_count = log2(row_count) as usize;
+        let output_bit_len = log_row_count * d;
+        let output_len = 1 << output_bit_len;
+        let mut output = Vec::with_capacity(output_len);
+
+        for i in 0..output_len {
+            let mut local_output = vec![T::one(); col_count];
+            for j in 0..d {
+                let offset = (d - j - 1) * log_row_count;
+                let index = (i >> offset) & (row_count - 1);
+                let matrix_row = &matrices[j].evaluation_rows[index];
+
+                local_output
+                    .iter_mut()
+                    .zip(matrix_row.iter())
+                    .for_each(|(m_acc, m_curr)| *m_acc = m_acc.clone() * m_curr.clone());
+            }
+            let local_sum = local_output
+                .iter()
+                .fold(T::zero(), |sum, val| sum + val.clone());
+            output.push(local_sum);
+        }
+        output
+    }
 }
 
 impl<F: Field> MatrixPolynomial<F> {

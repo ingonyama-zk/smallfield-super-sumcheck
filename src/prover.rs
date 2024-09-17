@@ -37,6 +37,8 @@ pub struct ProverState<EF: Field, BF: PrimeField> {
     pub randomness: Vec<EF>,
     /// Stores a list of multilinear extensions
     pub state_polynomials: Vec<LinearLagrangeList<BF>>,
+    /// Stores a list of multilinear extensions
+    pub state_polynomials_int: Vec<Vec<i64>>,
     /// Number of variables
     pub num_vars: usize,
     /// Max number of multiplicands in a product
@@ -52,6 +54,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// The degree of the sumcheck round polynomial also needs to be input.
     pub fn prover_init(
         polynomials: &Vec<LinearLagrangeList<BF>>,
+        polynomials_int: &Vec<Vec<i64>>,
         sumcheck_poly_degree: usize,
         algorithm: AlgorithmType,
     ) -> ProverState<EF, BF> {
@@ -73,10 +76,27 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             panic!("Number of polynomial evaluations must be a power of two.")
         }
 
+        let polynomials_as_vector: Vec<Vec<BF>> = polynomials
+            .iter()
+            .map(|poly_list| poly_list.to_vector())
+            .collect();
+
+        let polynomials_int_as_field_vector = polynomials_int
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&val| BF::from(val as u64))
+                    .collect::<Vec<BF>>()
+            })
+            .collect::<Vec<Vec<BF>>>();
+
+        assert_eq!(polynomials_as_vector, polynomials_int_as_field_vector);
+
         let num_variables: usize = log2(2 * problem_size).try_into().unwrap();
         ProverState {
             randomness: Vec::with_capacity(num_variables),
             state_polynomials: polynomials.to_vec(),
+            state_polynomials_int: polynomials_int.clone(),
             num_vars: num_variables,
             max_multiplicands: sumcheck_poly_degree,
             round: 0,

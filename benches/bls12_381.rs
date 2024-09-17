@@ -21,6 +21,7 @@ use smallfield_sumcheck::prover::SumcheckProof;
 use smallfield_sumcheck::tests::test_helpers::create_sumcheck_test_data;
 use smallfield_sumcheck::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
 use smallfield_sumcheck::tests::test_helpers::get_maps_from_matrix;
+use smallfield_sumcheck::tests::test_helpers::WitnessType;
 use smallfield_sumcheck::IPForMLSumcheck;
 
 type BF = ark_bls12_381::Fq;
@@ -93,7 +94,7 @@ pub fn sumcheck_test_helper(
     let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
         create_primitive_functions();
     let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-        create_sumcheck_test_data(nv, degree, algorithm.clone());
+        create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
     let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
         setup_for_toom_cook(degree, with_inversions);
@@ -165,7 +166,8 @@ pub fn setup_for_toom_cook(
     let projective_map_indices = vec![0 as usize, 1 as usize];
 
     // Define interpolation mappings
-    let (interpolation_matrix, scaled_det) = generate_binomial_interpolation_mult_matrix_transpose(degree);
+    let (interpolation_matrix, scaled_det) =
+        generate_binomial_interpolation_mult_matrix_transpose(degree);
 
     // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
     let mut divisor: i64 = 1;
@@ -225,7 +227,12 @@ pub fn sumcheck_prove_bench(
                         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
                             create_primitive_functions();
                         let (prover_state, _): (ProverState<EF, BF>, BF) =
-                            create_sumcheck_test_data(nv, degree, algorithm.clone());
+                            create_sumcheck_test_data(
+                                nv,
+                                degree,
+                                algorithm.clone(),
+                                WitnessType::U1,
+                            );
                         let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, _) =
                             setup_for_toom_cook(degree, with_inversions);
                         let prover_transcript = Transcript::new(b"bench_sumcheck");

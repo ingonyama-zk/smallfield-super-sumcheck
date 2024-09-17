@@ -22,6 +22,7 @@ merlin = { version = "3.0.0" }
 itertools = "0.12.1"
 nalgebra = { version = "0.32.5" }
 rstest = { version = "0.19.0" }
+num = { version = "0.4" }
 
 [dev-dependencies]
 criterion = "0.5.1"
