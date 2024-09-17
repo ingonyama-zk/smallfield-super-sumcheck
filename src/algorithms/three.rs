@@ -1,9 +1,10 @@
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
+use std::time::Instant;
 
 use crate::data_structures::{
-    bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial,
+    bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt,
 };
 use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
@@ -41,11 +42,16 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // and so on.
         let r_degree = prover_state.max_multiplicands;
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
+        let mut matrix_polynomials_int: Vec<MatrixPolynomialInt<i64>> =
+            Vec::with_capacity(r_degree);
 
         for i in 0..r_degree {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));
+            matrix_polynomials_int.push(MatrixPolynomialInt::from_evaluations(
+                &prover_state.state_polynomials_int[i],
+            ))
         }
 
         // Pre-compute bb multiplications upto round t
@@ -54,13 +60,38 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
+
+            for matrix_int in &mut matrix_polynomials_int {
+                matrix_int.heighten();
+            }
         }
+        let start_bb = Instant::now();
+
         let precomputed_array =
             MatrixPolynomial::tensor_inner_product::<_>(&matrix_polynomials, &mult_bb);
+
+        let elapsed_bb = start_bb.elapsed();
+        println!("bb_mults: {:?}", elapsed_bb);
         assert_eq!(
             precomputed_array.len(),
             (1 as usize) << (round_t * r_degree)
         );
+
+        // println!("array_bf = {:?}", precomputed_array);
+
+        let start_int = Instant::now();
+
+        let precomputed_array_int =
+            MatrixPolynomialInt::tensor_inner_product(&matrix_polynomials_int);
+
+        let elapsed_int = start_int.elapsed();
+        println!("int_mults: {:?}", elapsed_int);
+        assert_eq!(
+            precomputed_array_int.len(),
+            (1 as usize) << (round_t * r_degree)
+        );
+
+        // println!("array_int = {:?}", precomputed_array_int);
 
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
