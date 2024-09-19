@@ -305,6 +305,7 @@ pub struct MatrixPolynomialInt<T> {
 impl<T> MatrixPolynomialInt<T>
 where
     T: Clone
+        + Copy
         + Add<Output = T>
         + Mul<Output = T>
         + AddAssign
@@ -373,6 +374,78 @@ where
                 .iter()
                 .fold(T::zero(), |sum, val| sum + val.clone());
             output.push(local_sum);
+        }
+        output
+    }
+
+    pub fn compute_merkle_roots(
+        input_polynomial: &MatrixPolynomialInt<T>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&T, &T) -> T>>,
+    ) -> MatrixPolynomialInt<T> {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        // bitmask: (d + 1)-bit mask
+        let num_maps = mappings.len();
+        let depth = log2(input_polynomial.no_of_rows) as usize;
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut output = MatrixPolynomialInt {
+            no_of_rows: 1,
+            no_of_columns: input_polynomial.no_of_columns,
+            evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
+        };
+
+        // Outer loop over x
+        for x in 0..input_polynomial.no_of_columns {
+            // Fetch all input polynomial values for a given x: f(*, x)
+            // where * represents p-bit integers: {0, 1, ..., 2^p - 1}.
+            let mut layer_values: Vec<T> = input_polynomial
+                .evaluation_rows
+                .iter()
+                .map(|row| row[x])
+                .collect();
+
+            // Start iterating over merkle tree layers starting with leaf values
+            for layer in 1..=depth {
+                let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
+                let mapping_for_this_layer = &mappings[j_layer];
+
+                let layer_size = (1 as usize) << (depth - layer);
+                for i in 0..layer_size {
+                    let left = &layer_values[2 * i];
+                    let right = &layer_values[2 * i + 1];
+                    layer_values[i] = mapping_for_this_layer(left, right);
+                }
+                layer_values.truncate(layer_size);
+            }
+            output.evaluation_rows[0].push(layer_values[0]);
+        }
+        output
+    }
+
+    pub fn hadamard_product<P>(&self, rhs: &MatrixPolynomialInt<T>) -> MatrixPolynomialInt<T> {
+        assert_eq!(self.no_of_columns, rhs.no_of_columns);
+        assert_eq!(self.no_of_rows, rhs.no_of_rows);
+
+        let mut output = MatrixPolynomialInt {
+            no_of_rows: self.no_of_rows,
+            no_of_columns: self.no_of_columns,
+            evaluation_rows: Vec::with_capacity(self.no_of_rows),
+        };
+
+        for i in 0..self.no_of_rows {
+            let left_vec: &Vec<T> = &self.evaluation_rows[i];
+            let right_vec: &Vec<T> = &rhs.evaluation_rows[i];
+            let left_right_hadamard: Vec<T> = left_vec
+                .iter()
+                .zip(right_vec.iter())
+                .map(|(&l, &r)| l * r)
+                .collect();
+            output.evaluation_rows.push(left_right_hadamard);
         }
         output
     }

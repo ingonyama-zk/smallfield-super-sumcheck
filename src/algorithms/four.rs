@@ -117,9 +117,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let mut precomputed_array: Vec<BF> = Vec::with_capacity(num_product_terms);
         for j in 0..num_product_terms {
             let mut product_terms_x: MatrixPolynomial<BF> =
-                MatrixPolynomial::ones(1, matrix_polynomials[0].no_of_columns);
+                MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings);
 
-            for i in 0..matrix_polynomials.len() {
+            for i in 1..matrix_polynomials.len() {
                 let matrix_terms_x =
                     MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings);
                 product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x, mult_bb);
