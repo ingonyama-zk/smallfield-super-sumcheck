@@ -1,5 +1,5 @@
 use std::{
-    ops::{Add, AddAssign, Mul, Sub},
+    ops::{Add, AddAssign, Mul, MulAssign, Sub},
     vec,
 };
 
@@ -308,6 +308,7 @@ where
         + Copy
         + Add<Output = T>
         + Mul<Output = T>
+        + MulAssign
         + AddAssign
         + Sub<Output = T>
         + Zero
@@ -368,11 +369,9 @@ where
                 local_output
                     .iter_mut()
                     .zip(matrix_row.iter())
-                    .for_each(|(m_acc, m_curr)| *m_acc = m_acc.clone() * m_curr.clone());
+                    .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
             }
-            let local_sum = local_output
-                .iter()
-                .fold(T::zero(), |sum, val| sum + val.clone());
+            let local_sum = local_output.iter().fold(T::zero(), |sum, val| sum + (*val));
             output.push(local_sum);
         }
         output
@@ -447,6 +446,47 @@ where
                 .collect();
             output.evaluation_rows.push(left_right_hadamard);
         }
+        output
+    }
+
+    pub fn merkle_sums(
+        input: &Vec<T>,
+        num_children: usize,
+        indices_to_combine: &Vec<usize>,
+    ) -> Vec<Vec<T>> {
+        let input_size = input.len();
+        let depth: usize = input_size.ilog(num_children) as usize;
+        assert!(indices_to_combine.len() <= num_children);
+        assert_eq!(input_size, num_children.pow(depth as u32));
+
+        // Reserve space for the output in advance
+        let mut output: Vec<Vec<T>> = Vec::with_capacity(depth + 1);
+        output.push(input.clone());
+
+        let mut layer = input.clone();
+        let mut layer_size = input_size / num_children;
+
+        for _ in 1..=depth {
+            let mut next_layer = Vec::with_capacity(layer_size);
+
+            // Combine the selected indices for each node
+            for j in 0..layer_size {
+                let mut layer_value = T::zero();
+
+                // Precompute base index for performance
+                let base_idx = num_children * j;
+                for &idx in indices_to_combine.iter() {
+                    layer_value += layer[base_idx + idx];
+                }
+
+                next_layer.push(layer_value);
+            }
+
+            output.push(next_layer.clone());
+            layer = next_layer; // Move to the next layer
+            layer_size /= num_children; // Update the layer size
+        }
+        output.reverse();
         output
     }
 }
