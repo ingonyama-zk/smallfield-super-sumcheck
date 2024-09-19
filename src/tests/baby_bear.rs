@@ -206,7 +206,23 @@ mod fq4_tests {
     fn check_simple_sumcheck_product() {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(16, 3, 4, AlgorithmType::Precomputation, false)
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::Precomputation, false)
+                .1
+                .unwrap(),
+            true
+        );
+
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::Naive, false)
+                .1
+                .unwrap(),
+            true
+        );
+
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::ToomCook, false)
                 .1
                 .unwrap(),
             true

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
@@ -28,6 +30,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
+        let start_algo4 = Instant::now();
+
         // Assertions
         assert_eq!(projection_mapping_indices.len(), 2);
 
@@ -284,5 +288,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
+
+        let end = start_algo4.elapsed();
+        println!("prove_algo4: {:?}", end);
     }
 }
