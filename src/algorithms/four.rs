@@ -4,7 +4,7 @@ use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
 
-use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
+use crate::data_structures::{LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt};
 use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
 use crate::IPForMLSumcheck;
@@ -20,6 +20,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_ee: &EE,
         mult_bb: &BB,
         mappings: &Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
+        mappings_int: &Vec<Box<dyn Fn(&i64, &i64) -> i64>>,
         projection_mapping_indices: &Vec<usize>,
         interpolation_maps_bf: &Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
         interpolation_maps_ef: &Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
@@ -53,10 +54,16 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // and so on.
         let r_degree = prover_state.max_multiplicands;
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
+        let mut matrix_polynomials_int: Vec<MatrixPolynomialInt<i64>> =
+            Vec::with_capacity(r_degree);
 
         for i in 0..r_degree {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
+            ));
+
+            matrix_polynomials_int.push(MatrixPolynomialInt::from_evaluations(
+                &prover_state.state_polynomials_int[i],
             ));
         }
 
@@ -110,27 +117,72 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
+
+            for matrix_int in &mut matrix_polynomials_int {
+                matrix_int.heighten();
+            }
         }
 
         let num_evals = r_degree + 1;
         let num_product_terms = num_evals.pow(round_t as u32);
-        let mut precomputed_array: Vec<BF> = Vec::with_capacity(num_product_terms);
+
+        // // Pre-compute array (field operations)
+        // let mut precomputed_array: Vec<BF> = Vec::with_capacity(num_product_terms);
+        // for j in 0..num_product_terms {
+        //     let mut product_terms_x: MatrixPolynomial<BF> =
+        //         MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings);
+
+        //     for i in 1..matrix_polynomials.len() {
+        //         let matrix_terms_x =
+        //             MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings);
+        //         product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x, mult_bb);
+        //     }
+
+        //     assert_eq!(product_terms_x.no_of_rows, 1);
+        //     let sum_over_x = product_terms_x.evaluation_rows[0]
+        //         .iter()
+        //         .fold(BF::zero(), |acc, px| acc + px);
+        //     precomputed_array.push(sum_over_x);
+        // }
+
+        // Pre-compute array (int operations)
+        let mut precomputed_array_int: Vec<i64> = Vec::with_capacity(num_product_terms);
         for j in 0..num_product_terms {
-            let mut product_terms_x: MatrixPolynomial<BF> =
-                MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings);
+            let mut product_terms_x: MatrixPolynomialInt<i64> =
+                MatrixPolynomialInt::compute_merkle_roots(
+                    &matrix_polynomials_int[0],
+                    j,
+                    mappings_int,
+                );
 
             for i in 1..matrix_polynomials.len() {
-                let matrix_terms_x =
-                    MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings);
-                product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x, mult_bb);
+                let matrix_terms_x = MatrixPolynomialInt::compute_merkle_roots(
+                    &matrix_polynomials_int[i],
+                    j,
+                    mappings_int,
+                );
+                product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x);
             }
 
             assert_eq!(product_terms_x.no_of_rows, 1);
             let sum_over_x = product_terms_x.evaluation_rows[0]
                 .iter()
-                .fold(BF::zero(), |acc, px| acc + px);
-            precomputed_array.push(sum_over_x);
+                .fold(0i64, |acc, px| acc + px);
+            precomputed_array_int.push(sum_over_x);
         }
+
+        let precomputed_array: Vec<BF> = precomputed_array_int
+            .iter()
+            .map(|&p| {
+                let p_positive = BF::from(p.abs() as u64);
+                let adjusted_value = if p < 0 { -p_positive } else { p_positive };
+                adjusted_value
+            })
+            .collect();
+
+        // println!("int array:\n{:?}", precomputed_array_int);
+
+        // assert_eq!(precomputed_array_from, precomputed_array);
 
         // Accumulate pre-computed values to be used in rounds.
         let precomputed_arrays_for_rounds = MatrixPolynomial::<BF>::merkle_sums(

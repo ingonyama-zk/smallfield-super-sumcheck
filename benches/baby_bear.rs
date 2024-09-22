@@ -17,9 +17,8 @@ use smallfield_sumcheck::error::SumcheckError;
 use smallfield_sumcheck::prover::AlgorithmType;
 use smallfield_sumcheck::prover::ProverState;
 use smallfield_sumcheck::prover::SumcheckProof;
+use smallfield_sumcheck::tests::test_helpers::common_setup_for_toom_cook;
 use smallfield_sumcheck::tests::test_helpers::create_sumcheck_test_data;
-use smallfield_sumcheck::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-use smallfield_sumcheck::tests::test_helpers::get_maps_from_matrix;
 use smallfield_sumcheck::tests::test_helpers::WitnessType;
 use smallfield_sumcheck::IPForMLSumcheck;
 
@@ -99,8 +98,8 @@ pub fn sumcheck_test_helper(
     let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
         create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-    let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-        setup_for_toom_cook(degree, with_inversions);
+    let (emaps_base, emaps_base_int, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
+        common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
     // create a proof
     let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -116,6 +115,7 @@ pub fn sumcheck_test_helper(
         &mult_bb,
         Some(round_t),
         Some(&emaps_base),
+        Some(&emaps_base_int),
         Some(&projective_map_indices),
         Some(&imaps_base),
         Some(&imaps_ext),
@@ -139,57 +139,6 @@ pub fn sumcheck_test_helper(
     (proof, result)
 }
 
-/// Setup all mappings etc for the toom-cook algorithm.
-pub fn setup_for_toom_cook(
-    degree: usize,
-    with_inversions: bool,
-) -> (
-    Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-    Vec<usize>,
-    Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-    Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-    i64,
-) {
-    // Define evaluation mappings
-    // p(x) = p0 + p1.x
-    let num_evals = degree + 1;
-    let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-    emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-    emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-    for i in 1..=(num_evals / 2) {
-        if emaps_base.len() < num_evals {
-            let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-            emaps_base.push(mapi);
-        }
-        if emaps_base.len() < num_evals {
-            let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-            emaps_base.push(mapi);
-        }
-    }
-    let projective_map_indices = vec![0 as usize, 1 as usize];
-
-    // Define interpolation mappings
-    let (interpolation_matrix, scaled_det) =
-        generate_binomial_interpolation_mult_matrix_transpose(degree);
-
-    // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-    let mut divisor: i64 = 1;
-    if with_inversions {
-        divisor = scaled_det;
-    }
-
-    let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-    let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-    (
-        emaps_base,
-        projective_map_indices,
-        imaps_base,
-        imaps_ext,
-        scaled_det,
-    )
-}
-
 pub struct ProverInputs {
     prover_state: ProverState<EF, BF>,
     combine_ef: Box<dyn Fn(&Vec<EF>) -> EF + Sync>,
@@ -202,6 +151,7 @@ pub struct ProverInputs {
     mult_bb: Box<dyn Fn(&BF, &BF) -> BF + Sync>,
     round_t: usize,
     mappings: Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
+    mappings_int: Vec<Box<dyn Fn(&i64, &i64) -> i64>>,
     projection_mapping_indices: Vec<usize>,
     interpolation_maps_bf: Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
@@ -236,8 +186,15 @@ pub fn sumcheck_prove_bench(
                                 algorithm.clone(),
                                 WitnessType::U1,
                             );
-                        let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, _) =
-                            setup_for_toom_cook(degree, with_inversions);
+                        let (
+                            emaps_base,
+                            emaps_base_int,
+                            projection_mapping_indices,
+                            imaps_base,
+                            imaps_ext,
+                            _,
+                        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
+
                         let prover_transcript = Transcript::new(b"bench_sumcheck");
 
                         ProverInputs {
@@ -252,6 +209,7 @@ pub fn sumcheck_prove_bench(
                             mult_bb,
                             round_t,
                             mappings: emaps_base,
+                            mappings_int: emaps_base_int,
                             projection_mapping_indices,
                             interpolation_maps_bf: imaps_base,
                             interpolation_maps_ef: imaps_ext,
@@ -271,6 +229,7 @@ pub fn sumcheck_prove_bench(
                         &prover_input.mult_bb,
                         Some(prover_input.round_t),
                         Some(&prover_input.mappings),
+                        Some(&prover_input.mappings_int),
                         Some(&prover_input.projection_mapping_indices),
                         Some(&prover_input.interpolation_maps_bf),
                         Some(&prover_input.interpolation_maps_ef),

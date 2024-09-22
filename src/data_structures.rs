@@ -426,7 +426,7 @@ where
         output
     }
 
-    pub fn hadamard_product<P>(&self, rhs: &MatrixPolynomialInt<T>) -> MatrixPolynomialInt<T> {
+    pub fn hadamard_product(&self, rhs: &MatrixPolynomialInt<T>) -> MatrixPolynomialInt<T> {
         assert_eq!(self.no_of_columns, rhs.no_of_columns);
         assert_eq!(self.no_of_rows, rhs.no_of_rows);
 

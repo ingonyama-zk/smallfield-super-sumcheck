@@ -292,6 +292,75 @@ pub mod test_helpers {
             })
             .collect::<Vec<Box<dyn Fn(&Vec<FF>) -> FF>>>()
     }
+
+    /// Setup all mappings etc for the toom-cook algorithm.
+    pub fn common_setup_for_toom_cook<BF: Field, EF: Field>(
+        degree: usize,
+        with_inversions: bool,
+    ) -> (
+        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
+        Vec<Box<dyn Fn(&i64, &i64) -> i64>>,
+        Vec<usize>,
+        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
+        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
+        i64,
+    ) {
+        // Define evaluation mappings
+        // p(x) = p0 + p1.x
+        let num_evals = degree + 1;
+        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
+        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
+        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
+        for i in 1..=(num_evals / 2) {
+            if emaps_base.len() < num_evals {
+                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
+                emaps_base.push(mapi);
+            }
+            if emaps_base.len() < num_evals {
+                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
+                emaps_base.push(mapi);
+            }
+        }
+
+        // Define integer maps
+        let mut emaps_base_int: Vec<Box<dyn Fn(&i64, &i64) -> i64>> = Vec::with_capacity(num_evals);
+        emaps_base_int.push(Box::new(move |x: &i64, _y: &i64| -> i64 { *x }));
+        emaps_base_int.push(Box::new(move |_x: &i64, y: &i64| -> i64 { *y }));
+        for i in 1..=(num_evals / 2) {
+            if emaps_base_int.len() < num_evals {
+                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x + (*y * (i as i64)) });
+                emaps_base_int.push(mapi);
+            }
+            if emaps_base_int.len() < num_evals {
+                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x - (*y * (i as i64)) });
+                emaps_base_int.push(mapi);
+            }
+        }
+
+        let projective_map_indices = vec![0 as usize, 1 as usize];
+
+        // Define interpolation mappings
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
+
+        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
+        let mut divisor: i64 = 1;
+        if with_inversions {
+            divisor = scaled_det;
+        }
+
+        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
+        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
+
+        (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            scaled_det,
+        )
+    }
 }
 
 #[cfg(test)]

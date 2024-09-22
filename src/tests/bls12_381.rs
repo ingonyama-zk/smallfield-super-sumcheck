@@ -4,9 +4,8 @@ mod fq_tests {
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-    use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -85,8 +84,14 @@ mod fq_tests {
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
             create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-        let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree, with_inversions);
+        let (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            mut scaled_det,
+        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -102,6 +107,7 @@ mod fq_tests {
             &mult_bb,
             Some(round_t),
             Some(&emaps_base),
+            Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
@@ -125,62 +131,11 @@ mod fq_tests {
         (proof, result)
     }
 
-    /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn setup_for_toom_cook(
-        degree: usize,
-        with_inversions: bool,
-    ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-        i64,
-    ) {
-        // Define evaluation mappings
-        // p(x) = p0 + p1.x
-        let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-        }
-        let projective_map_indices = vec![0 as usize, 1 as usize];
-
-        // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) =
-            generate_binomial_interpolation_mult_matrix_transpose(degree);
-
-        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-        let mut divisor: i64 = 1;
-        if with_inversions {
-            divisor = scaled_det;
-        }
-
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-        (
-            emaps_base,
-            projective_map_indices,
-            imaps_base,
-            imaps_ext,
-            scaled_det,
-        )
-    }
-
     #[test]
     fn check_simple_sumcheck_product() {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(16, 3, 4, AlgorithmType::Precomputation, false)
+            sumcheck_test_helper(24, 3, 2, AlgorithmType::Precomputation, false)
                 .1
                 .unwrap(),
             true
@@ -188,7 +143,7 @@ mod fq_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(16, 3, 4, AlgorithmType::Naive, false)
+            sumcheck_test_helper(24, 3, 2, AlgorithmType::Naive, false)
                 .1
                 .unwrap(),
             true
@@ -196,7 +151,7 @@ mod fq_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(16, 3, 4, AlgorithmType::ToomCook, false)
+            sumcheck_test_helper(24, 3, 2, AlgorithmType::ToomCook, false)
                 .1
                 .unwrap(),
             true
@@ -210,9 +165,8 @@ mod fq2_tests {
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-    use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -295,8 +249,14 @@ mod fq2_tests {
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
             create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-        let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree, with_inversions);
+        let (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            mut scaled_det,
+        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -312,6 +272,7 @@ mod fq2_tests {
             &mult_bb,
             Some(round_t),
             Some(&emaps_base),
+            Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
@@ -333,57 +294,6 @@ mod fq2_tests {
             Some(round_t_v),
         );
         (proof, result)
-    }
-
-    /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn setup_for_toom_cook(
-        degree: usize,
-        with_inversions: bool,
-    ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-        i64,
-    ) {
-        // Define evaluation mappings
-        // p(x) = p0 + p1.x
-        let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-        }
-        let projective_map_indices = vec![0 as usize, 1 as usize];
-
-        // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) =
-            generate_binomial_interpolation_mult_matrix_transpose(degree);
-
-        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-        let mut divisor: i64 = 1;
-        if with_inversions {
-            divisor = scaled_det;
-        }
-
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-        (
-            emaps_base,
-            projective_map_indices,
-            imaps_base,
-            imaps_ext,
-            scaled_det,
-        )
     }
 
     #[rstest]
@@ -464,9 +374,8 @@ mod fq6_tests {
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-    use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -554,8 +463,14 @@ mod fq6_tests {
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
             create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-        let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree, with_inversions);
+        let (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            mut scaled_det,
+        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -571,6 +486,7 @@ mod fq6_tests {
             &mult_bb,
             Some(round_t),
             Some(&emaps_base),
+            Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
@@ -592,57 +508,6 @@ mod fq6_tests {
             Some(round_t_v),
         );
         (proof, result)
-    }
-
-    /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn setup_for_toom_cook(
-        degree: usize,
-        with_inversions: bool,
-    ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-        i64,
-    ) {
-        // Define evaluation mappings
-        // p(x) = p0 + p1.x
-        let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-        }
-        let projective_map_indices = vec![0 as usize, 1 as usize];
-
-        // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) =
-            generate_binomial_interpolation_mult_matrix_transpose(degree);
-
-        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-        let mut divisor: i64 = 1;
-        if with_inversions {
-            divisor = scaled_det;
-        }
-
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-        (
-            emaps_base,
-            projective_map_indices,
-            imaps_base,
-            imaps_ext,
-            scaled_det,
-        )
     }
 
     #[rstest]
@@ -723,9 +588,8 @@ mod fq12_tests {
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-    use crate::tests::test_helpers::get_maps_from_matrix;
     use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
     use ark_ff::Field;
@@ -824,8 +688,14 @@ mod fq12_tests {
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
             create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-        let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree, with_inversions);
+        let (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            mut scaled_det,
+        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -841,6 +711,7 @@ mod fq12_tests {
             &mult_bb,
             Some(round_t),
             Some(&emaps_base),
+            Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
@@ -862,57 +733,6 @@ mod fq12_tests {
             Some(round_t_v),
         );
         (proof, result)
-    }
-
-    /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn setup_for_toom_cook(
-        degree: usize,
-        with_inversions: bool,
-    ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-        i64,
-    ) {
-        // Define evaluation mappings
-        // p(x) = p0 + p1.x
-        let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-        }
-        let projective_map_indices = vec![0 as usize, 1 as usize];
-
-        // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) =
-            generate_binomial_interpolation_mult_matrix_transpose(degree);
-
-        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-        let mut divisor: i64 = 1;
-        if with_inversions {
-            divisor = scaled_det;
-        }
-
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-        (
-            emaps_base,
-            projective_map_indices,
-            imaps_base,
-            imaps_ext,
-            scaled_det,
-        )
     }
 
     #[rstest]
