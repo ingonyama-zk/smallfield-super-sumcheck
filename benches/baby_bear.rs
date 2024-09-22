@@ -13,10 +13,8 @@ use criterion::BatchSize;
 use criterion::BenchmarkId;
 use criterion::Criterion;
 use merlin::Transcript;
-use smallfield_sumcheck::error::SumcheckError;
 use smallfield_sumcheck::prover::AlgorithmType;
 use smallfield_sumcheck::prover::ProverState;
-use smallfield_sumcheck::prover::SumcheckProof;
 use smallfield_sumcheck::tests::test_helpers::common_setup_for_toom_cook;
 use smallfield_sumcheck::tests::test_helpers::create_sumcheck_test_data;
 use smallfield_sumcheck::tests::test_helpers::WitnessType;
@@ -84,59 +82,6 @@ pub fn create_primitive_functions() -> (
         mult_bb,
         add_ee,
     )
-}
-
-pub fn sumcheck_test_helper(
-    nv: usize,
-    degree: usize,
-    round_t: usize,
-    algorithm: AlgorithmType,
-    with_inversions: bool,
-) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
-    let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
-        create_primitive_functions();
-    let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-        create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
-
-    let (emaps_base, emaps_base_int, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-        common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
-
-    // create a proof
-    let mut prover_transcript = Transcript::new(b"test_sumcheck");
-    let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
-        &mut prover_state,
-        &combine_ef,
-        &combine_bf,
-        &mut prover_transcript,
-        &to_ef,
-        &mult_be,
-        &add_ee,
-        &mult_ee,
-        &mult_bb,
-        Some(round_t),
-        Some(&emaps_base),
-        Some(&emaps_base_int),
-        Some(&projective_map_indices),
-        Some(&imaps_base),
-        Some(&imaps_ext),
-    );
-
-    let mut round_t_v = round_t;
-    if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
-        scaled_det = 1;
-        round_t_v = 0;
-    }
-
-    let mut verifier_transcript = Transcript::new(b"test_sumcheck");
-    let result = IPForMLSumcheck::<EF, BF>::verify(
-        to_ef(&claimed_sum),
-        &proof,
-        &mut verifier_transcript,
-        algorithm,
-        Some(EF::from(scaled_det)),
-        Some(round_t_v),
-    );
-    (proof, result)
 }
 
 pub struct ProverInputs {
