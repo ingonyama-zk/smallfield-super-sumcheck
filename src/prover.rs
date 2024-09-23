@@ -123,7 +123,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_bb: &BB,
         round_t: Option<usize>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF>>>,
-        mappings_int: Option<&Vec<Box<dyn Fn(&i64, &i64) -> i64>>>,
+        mappings_int: Option<&Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
         interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
         interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF>>>,
@@ -137,6 +137,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
+        flame::start("prove");
+
         // Initiate the transcript with the protocol name
         <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
@@ -213,6 +215,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_combine_function,
             ),
         }
+        flame::end("prove");
 
         SumcheckProof {
             num_vars: prover_state.num_vars,

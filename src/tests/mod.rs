@@ -299,7 +299,7 @@ pub mod test_helpers {
         with_inversions: bool,
     ) -> (
         Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<Box<dyn Fn(&i64, &i64) -> i64>>,
+        Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
         Vec<usize>,
         Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
         Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
@@ -323,7 +323,8 @@ pub mod test_helpers {
         }
 
         // Define integer maps
-        let mut emaps_base_int: Vec<Box<dyn Fn(&i64, &i64) -> i64>> = Vec::with_capacity(num_evals);
+        let mut emaps_base_int: Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>> =
+            Vec::with_capacity(num_evals);
         emaps_base_int.push(Box::new(move |x: &i64, _y: &i64| -> i64 { *x }));
         emaps_base_int.push(Box::new(move |_x: &i64, y: &i64| -> i64 { *y }));
         for i in 1..=(num_evals / 2) {

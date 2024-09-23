@@ -69,7 +69,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
         }
         let elapsed_1 = start_1.elapsed();
-        println!("    witness_restructure: {:?}", elapsed_1);
+        // println!("    witness_restructure: {:?}", elapsed_1);
 
         // let start_bb = Instant::now();
 
@@ -77,7 +77,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         //     MatrixPolynomial::tensor_inner_product::<_>(&matrix_polynomials, &mult_bb);
 
         // let elapsed_bb = start_bb.elapsed();
-        // println!("bb_mults: {:?}", elapsed_bb);
+        // println!("    witness_mults (bb): {:?}", elapsed_bb);
         // assert_eq!(
         //     precomputed_array_unused.len(),
         //     (1 as usize) << (round_t * r_degree)
@@ -91,7 +91,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             MatrixPolynomialInt::tensor_inner_product(&matrix_polynomials_int);
 
         let elapsed_int = start_int.elapsed();
-        println!("    witness_mults (bb): {:?}", elapsed_int);
+        // println!("    witness_mults (int): {:?}", elapsed_int);
         assert_eq!(
             precomputed_array_int.len(),
             (1 as usize) << (round_t * r_degree)
@@ -103,7 +103,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .map(|p| BF::from(*p as u64))
             .collect();
         let elapsed_2 = start_2.elapsed();
-        println!("    witness_int_to_field: {:?}", elapsed_2);
+        // println!("    witness_int_to_field: {:?}", elapsed_2);
 
         // assert_eq!(precomputed_array_from, precomputed_array);
 
@@ -136,7 +136,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             let elapsed_fetch = start_fetch.elapsed();
-            println!("    round_{}_fetch_witness: {:?}", round_num, elapsed_fetch);
+            // println!("    round_{}_fetch_witness: {:?}", round_num, elapsed_fetch);
 
             let start_chal = Instant::now();
             // Compute challenge terms for 2^{r * d - 1} terms
@@ -147,10 +147,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             let elapsed_chal = start_chal.elapsed();
-            println!(
-                "    round_{}_comp_challenges (ee): {:?}",
-                round_num, elapsed_chal
-            );
+            // println!(
+            //     "    round_{}_comp_challenges (ee): {:?}",
+            //     round_num, elapsed_chal
+            // );
 
             // Combine precomputed_array_for_this_round[i] and precomputed_array_for_this_round[i + 1]
             // substituting X = k.
@@ -173,10 +173,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 assert_eq!(scalar_matrix.no_of_columns, 1);
                 assert_eq!(scalar_matrix.no_of_rows, two_pow_degree);
                 let elapsed_round_k_scalar = start_round_k_scalar.elapsed();
-                println!(
-                    "    round_{}[{}]_scalar: {:?}",
-                    round_num, k, elapsed_round_k_scalar
-                );
+                // println!(
+                //     "    round_{}[{}]_scalar: {:?}",
+                //     round_num, k, elapsed_round_k_scalar
+                // );
 
                 let start_round_k_acc = Instant::now();
                 for (idx, challenge_multiplicand) in gamma_matrix.evaluation_rows.iter().enumerate()
@@ -202,10 +202,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 }
 
                 let elapsed_round_k_acc = start_round_k_acc.elapsed();
-                println!(
-                    "    round_{}[{}]_accumulation (be): {:?}",
-                    round_num, k, elapsed_round_k_acc
-                );
+                // println!(
+                //     "    round_{}[{}]_accumulation (be): {:?}",
+                //     round_num, k, elapsed_round_k_acc
+                // );
 
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
@@ -227,10 +227,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             );
 
             let elapsed_round_k_alpha = start_round_k_alpha.elapsed();
-            println!(
-                "    round_{}_sample_challenge: {:?}",
-                round_num, elapsed_round_k_alpha
-            );
+            // println!(
+            //     "    round_{}_sample_challenge: {:?}",
+            //     round_num, elapsed_round_k_alpha
+            // );
 
             let start_round_k_update_chal = Instant::now();
 
@@ -242,10 +242,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             let elapsed_round_k_update_chal = start_round_k_update_chal.elapsed();
-            println!(
-                "    round_{}_update_challenge (ee): {:?}",
-                round_num, elapsed_round_k_update_chal
-            );
+            // println!(
+            //     "    round_{}_update_challenge (ee): {:?}",
+            //     round_num, elapsed_round_k_update_chal
+            // );
         }
 
         let start_rem_rounds = Instant::now();
@@ -276,7 +276,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
 
         let elapsed_rem_rounds = start_rem_rounds.elapsed();
-        println!("    rem_rounds: {:?}", elapsed_rem_rounds);
+        // println!("    rem_rounds: {:?}", elapsed_rem_rounds);
 
         let end = start.elapsed();
         println!("prove_algo3: {:?}", end);

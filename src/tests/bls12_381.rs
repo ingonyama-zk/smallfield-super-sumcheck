@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod fq_tests {
+    use std::fs::File;
+
     use crate::error::SumcheckError;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
@@ -135,7 +137,7 @@ mod fq_tests {
     fn check_simple_sumcheck_product() {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 2, AlgorithmType::Precomputation, false)
+            sumcheck_test_helper(24, 3, 3, AlgorithmType::Precomputation, false)
                 .1
                 .unwrap(),
             true
@@ -143,19 +145,24 @@ mod fq_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 2, AlgorithmType::Naive, false)
+            sumcheck_test_helper(24, 3, 3, AlgorithmType::Naive, false)
                 .1
                 .unwrap(),
             true
         );
 
+        // flame::start("prove_toom_cook");
+
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 2, AlgorithmType::ToomCook, false)
+            sumcheck_test_helper(24, 3, 3, AlgorithmType::ToomCook, false)
                 .1
                 .unwrap(),
             true
         );
+
+        // flame::end("prove_toom_cook");
+        flame::dump_html(File::create("flamegraph.html").unwrap()).unwrap();
     }
 }
 

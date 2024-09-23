@@ -7,6 +7,7 @@ use crate::data_structures::LinearLagrangeList;
 use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
 use crate::IPForMLSumcheck;
+use rayon::prelude::*;
 
 impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     /// Computes the round polynomial using the algorithm 1 (collapsing arrays) from the paper
@@ -26,20 +27,34 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         F: Field,
     {
         let state_polynomial_len = state_polynomials[0].list.len();
-        for k in 0..(round_polynomial_degree + 1) {
-            for i in 0..state_polynomial_len {
-                let evaluations_at_k = state_polynomials
-                    .iter()
-                    .map(|state_poly| {
-                        // evaluate given state polynomial at x_1 = k
-                        let o = state_poly.list[i].odd;
-                        let e = state_poly.list[i].even;
-                        (F::one() - F::from(k as u32)) * e + F::from(k as u32) * o
-                    })
-                    .collect::<Vec<F>>();
 
-                // apply combine function
-                round_polynomials[round_number - 1][k] += combine_function(&evaluations_at_k);
+        // Parallel computation of contributions
+        let computed_contributions: Vec<Vec<EF>> = (0..=round_polynomial_degree)
+            .into_par_iter()
+            .map(|k| {
+                // For each `k`, collect contributions from all state polynomials
+                let mut contributions = vec![EF::zero(); state_polynomial_len];
+                for i in 0..state_polynomial_len {
+                    let evaluations_at_k: Vec<F> = state_polynomials
+                        .iter()
+                        .map(|state_poly| {
+                            let o = state_poly.list[i].odd;
+                            let e = state_poly.list[i].even;
+                            (F::one() - F::from(k as u32)) * e + F::from(k as u32) * o
+                        })
+                        .collect();
+
+                    // Apply combine function
+                    contributions[i] = combine_function(&evaluations_at_k);
+                }
+                contributions
+            })
+            .collect();
+
+        // Now, sequentially merge the computed contributions into round_polynomials
+        for (k, contributions) in computed_contributions.into_iter().enumerate() {
+            for contribution in contributions {
+                round_polynomials[round_number - 1][k] += contribution;
             }
         }
 

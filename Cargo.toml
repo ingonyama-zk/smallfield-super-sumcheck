@@ -14,7 +14,6 @@ ark-std = { version = "0.4.0", default-features = false }
 ark-poly = { version = "0.4.0", default-features = false }
 blake2 = { version = "0.10.6", default-features = false }
 hashbrown = { version = "0.14.0" }
-rayon = { version = "1", optional = true }
 ark-ec = { version = "0.4.2" }
 ark-bls12-381 = { version = "0.4.0" }
 rand = "0.8"
@@ -23,6 +22,8 @@ itertools = "0.12.1"
 nalgebra = { version = "0.32.5" }
 rstest = { version = "0.19.0" }
 num = { version = "0.4" }
+rayon = "1.5"
+flame = "0.2.2"
 
 [dev-dependencies]
 criterion = "0.5.1"

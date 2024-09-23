@@ -5,6 +5,7 @@ use std::{
 
 use num::One;
 use num::Zero;
+use rayon::prelude::*;
 
 use ark_std::{
     fmt::{self, Formatter},
@@ -343,7 +344,10 @@ where
         }
     }
 
-    pub fn tensor_inner_product(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<T> {
+    pub fn tensor_inner_product(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<T>
+    where
+        T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
+    {
         let d = matrices.len();
         let row_count = matrices[0].no_of_rows;
         let col_count = matrices[0].no_of_columns;
@@ -357,30 +361,34 @@ where
         let log_row_count = log2(row_count) as usize;
         let output_bit_len = log_row_count * d;
         let output_len = 1 << output_bit_len;
-        let mut output = Vec::with_capacity(output_len);
 
-        for i in 0..output_len {
-            let mut local_output = vec![T::one(); col_count];
-            for j in 0..d {
-                let offset = (d - j - 1) * log_row_count;
-                let index = (i >> offset) & (row_count - 1);
-                let matrix_row = &matrices[j].evaluation_rows[index];
+        // Use parallel iterator to compute output
+        (0..output_len)
+            .into_par_iter()
+            .map(|i| {
+                // Compute the tensor product for each `i` in parallel
+                let mut local_output = vec![T::one(); col_count];
+                for j in 0..d {
+                    let offset = (d - j - 1) * log_row_count;
+                    let index = (i >> offset) & (row_count - 1);
+                    let matrix_row = &matrices[j].evaluation_rows[index];
 
-                local_output
-                    .iter_mut()
-                    .zip(matrix_row.iter())
-                    .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
-            }
-            let local_sum = local_output.iter().fold(T::zero(), |sum, val| sum + (*val));
-            output.push(local_sum);
-        }
-        output
+                    local_output
+                        .iter_mut()
+                        .zip(matrix_row.iter())
+                        .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
+                }
+
+                // Sum up the local output
+                local_output.iter().copied().sum()
+            })
+            .collect()
     }
 
     pub fn compute_merkle_roots(
         input_polynomial: &MatrixPolynomialInt<T>,
         index_j: usize,
-        mappings: &Vec<Box<dyn Fn(&T, &T) -> T>>,
+        mappings: &Vec<Box<dyn Fn(&T, &T) -> T + Send + Sync>>,
     ) -> MatrixPolynomialInt<T> {
         // Fetch parameters.
         // num_maps: (d + 1)
@@ -398,31 +406,31 @@ where
             evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
         };
 
-        // Outer loop over x
-        for x in 0..input_polynomial.no_of_columns {
-            // Fetch all input polynomial values for a given x: f(*, x)
-            // where * represents p-bit integers: {0, 1, ..., 2^p - 1}.
-            let mut layer_values: Vec<T> = input_polynomial
-                .evaluation_rows
-                .iter()
-                .map(|row| row[x])
-                .collect();
+        // Parallelize the outer loop over x
+        output.evaluation_rows[0] = (0..input_polynomial.no_of_columns)
+            .into_par_iter() // Use parallel iterator
+            .map(|x| {
+                let mut layer_values: Vec<T> = input_polynomial
+                    .evaluation_rows
+                    .iter()
+                    .map(|row| row[x].clone()) // Use clone if T doesn't implement Copy
+                    .collect();
 
-            // Start iterating over merkle tree layers starting with leaf values
-            for layer in 1..=depth {
-                let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
-                let mapping_for_this_layer = &mappings[j_layer];
+                for layer in 1..=depth {
+                    let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
+                    let mapping_for_this_layer = &mappings[j_layer];
 
-                let layer_size = (1 as usize) << (depth - layer);
-                for i in 0..layer_size {
-                    let left = &layer_values[2 * i];
-                    let right = &layer_values[2 * i + 1];
-                    layer_values[i] = mapping_for_this_layer(left, right);
+                    let layer_size = 1 << (depth - layer);
+                    for i in 0..layer_size {
+                        let left = &layer_values[2 * i];
+                        let right = &layer_values[2 * i + 1];
+                        layer_values[i] = mapping_for_this_layer(left, right);
+                    }
+                    layer_values.truncate(layer_size);
                 }
-                layer_values.truncate(layer_size);
-            }
-            output.evaluation_rows[0].push(layer_values[0]);
-        }
+                layer_values[0].clone() // Return the root value for this x
+            })
+            .collect();
         output
     }
 

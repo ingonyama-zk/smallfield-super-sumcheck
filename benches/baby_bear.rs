@@ -96,7 +96,7 @@ pub struct ProverInputs {
     mult_bb: Box<dyn Fn(&BF, &BF) -> BF + Sync>,
     round_t: usize,
     mappings: Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-    mappings_int: Vec<Box<dyn Fn(&i64, &i64) -> i64>>,
+    mappings_int: Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
     projection_mapping_indices: Vec<usize>,
     interpolation_maps_bf: Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
