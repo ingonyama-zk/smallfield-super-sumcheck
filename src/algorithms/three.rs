@@ -26,7 +26,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
-        flame::start("input processing");
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
         // Round 1:
@@ -66,9 +65,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
         }
 
-        flame::end("input processing");
-        flame::start("int mults");
-
         let precomputed_array_int =
             MatrixPolynomialInt::tensor_inner_product(&matrix_polynomials_int);
 
@@ -82,8 +78,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .map(|p| BF::from(*p as u64))
             .collect();
 
-        flame::end("int mults");
-
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
         // [ (1-α_1)(1-α_2)...(α_m) ]
@@ -96,7 +90,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let sum_power_t = (precomputed_array.len() - 1) / (two_power_t - 1);
         // Process first t rounds
         for round_num in 1..=round_t {
-            flame::start(format!("round_poly_{}", round_num));
             let round_size = (1 as usize) << (round_num * r_degree);
             let mut precomputed_array_for_this_round: Vec<BF> = vec![BF::zero(); round_size];
 
@@ -162,9 +155,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
             }
-            flame::end(format!("round_poly_{}", round_num));
-
-            flame::start(format!("round_challenge_{}", round_num));
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
@@ -179,21 +169,13 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 b"challenge_nextround",
             );
 
-            flame::end(format!("round_challenge_{}", round_num));
-
-            flame::start(format!("round_challenge_update_{}", round_num));
-
             // Update challenge matrix with new challenge
             let challenge_tuple =
                 DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
-
-            flame::end(format!("round_challenge_update_{}", round_num));
         }
-
-        flame::start("remaining_rounds");
 
         // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
         // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
@@ -219,6 +201,5 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
-        flame::end("remaining_rounds");
     }
 }

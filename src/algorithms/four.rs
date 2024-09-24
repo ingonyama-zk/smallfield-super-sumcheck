@@ -1,5 +1,3 @@
-use flame;
-
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
@@ -31,8 +29,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
-        flame::start("input preprocessing");
-
         // Assertions
         assert_eq!(projection_mapping_indices.len(), 2);
 
@@ -113,8 +109,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         //  3    Σ_y ∏_i p_i(1, y)                Σ_x ∏_i p_i(1, 0, x)                 +  Σ_x ∏_i p_i(1, 1, x)                   C[12] + C[15]
         // +-----------------------------------------------------------------------------------------------------------------------------------+
         //
-        flame::start("heigten");
-
         for _ in 2..=round_t {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
@@ -124,14 +118,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 matrix_int.heighten();
             }
         }
-        flame::end("heigten");
-
-        flame::end("input preprocessing");
 
         let num_evals = r_degree + 1;
         let num_product_terms = num_evals.pow(round_t as u32);
-
-        flame::start("mult int");
 
         // Pre-compute array (int operations)
         let mut precomputed_array_int: Vec<i64> = Vec::with_capacity(num_product_terms);
@@ -159,9 +148,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             precomputed_array_int.push(sum_over_x);
         }
 
-        flame::end("mult int");
-        flame::start("convert");
-
         let precomputed_array: Vec<BF> = precomputed_array_int
             .iter()
             .map(|&p| {
@@ -171,17 +157,12 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             })
             .collect();
 
-        flame::end("convert");
-        flame::start("pre-computed sums");
-
         // Accumulate pre-computed values to be used in rounds.
         let precomputed_arrays_for_rounds = MatrixPolynomial::<BF>::merkle_sums(
             &precomputed_array,
             num_evals,
             projection_mapping_indices,
         );
-
-        flame::end("pre-computed sums");
 
         // Initialise empty challenge matrix
         let mut challenge_matrix: MatrixPolynomial<EF> = MatrixPolynomial::<EF> {
@@ -214,7 +195,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         // Process first t rounds
         for round_num in 1..=round_t {
-            flame::start(format!("round_poly_{}", round_num));
             let round_size = num_evals.pow(round_num as u32);
 
             // Fetch (d + 1)^p witness terms using only bb additions
@@ -268,9 +248,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                         mult_be(&local_witness_accumulator, &local_interpolated_challenge);
                 }
             }
-            flame::end(format!("round_poly_{}", round_num));
 
-            flame::start(format!("round_challenge_{}", round_num));
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
@@ -283,10 +261,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 transcript,
                 b"challenge_nextround",
             );
-
-            flame::end(format!("round_challenge_{}", round_num));
-
-            flame::start(format!("round_challenge_update_{}", round_num));
 
             // Update the challenge matrix with the new challenge row
             // This computes the following terms for the newly computed challenge αᵢ
@@ -313,11 +287,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
-
-            flame::end(format!("round_challenge_update_{}", round_num));
         }
-
-        flame::start("remaining_rounds");
 
         // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
         // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
@@ -343,6 +313,5 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
-        flame::end("remaining_rounds");
     }
 }
