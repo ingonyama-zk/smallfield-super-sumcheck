@@ -89,7 +89,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
     {
-        let start_algo1 = Instant::now();
+        flame::start("first round");
+
         // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
         let r_degree = prover_state.max_multiplicands;
 
@@ -116,6 +117,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             ef_state_polynomials[j].fold_in_half(alpha);
         }
 
+        flame::end("first round");
+        flame::start("rem round");
+
         // Phase 2: Process the subsequent rounds with only ee multiplications.
         for round_number in 2..=prover_state.num_vars {
             let alpha = Self::compute_round_polynomial::<EC, EF>(
@@ -132,7 +136,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
-        let end = start_algo1.elapsed();
-        println!("prove_algo1: {:?}", end);
+        flame::end("rem round");
     }
 }

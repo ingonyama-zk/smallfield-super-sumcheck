@@ -207,7 +207,7 @@ mod fq4_tests {
         let input_b: Vec<f64> = (0..num_elements).map(|_| rng.gen::<f64>()).collect();
 
         let start = Instant::now();
-        let ip_ab: Vec<f64> = input_a
+        let _ip_ab: Vec<f64> = input_a
             .iter()
             .zip(input_b.iter())
             .map(|(a, b)| a * b)

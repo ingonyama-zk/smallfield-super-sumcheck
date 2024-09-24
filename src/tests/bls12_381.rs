@@ -135,9 +135,12 @@ mod fq_tests {
 
     #[test]
     fn check_simple_sumcheck_product() {
+        let n = 24;
+        let d = 3;
+        let t = 3;
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 3, AlgorithmType::Precomputation, false)
+            sumcheck_test_helper(n, d, t, AlgorithmType::Naive, false)
                 .1
                 .unwrap(),
             true
@@ -145,7 +148,7 @@ mod fq_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 3, AlgorithmType::Naive, false)
+            sumcheck_test_helper(n, d, t, AlgorithmType::Precomputation, false)
                 .1
                 .unwrap(),
             true
@@ -155,14 +158,15 @@ mod fq_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(24, 3, 3, AlgorithmType::ToomCook, false)
+            sumcheck_test_helper(n, d, t, AlgorithmType::ToomCook, false)
                 .1
                 .unwrap(),
             true
         );
 
         // flame::end("prove_toom_cook");
-        flame::dump_html(File::create("flamegraph.html").unwrap()).unwrap();
+        let output_path = format!("flame_u8_n={}_d={}_t={}.html", n, d, t);
+        flame::dump_html(File::create(output_path).unwrap()).unwrap();
     }
 }
 

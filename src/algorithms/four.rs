@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use flame;
 
 use ark_ff::{Field, PrimeField};
@@ -33,9 +31,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
-        // let _fg = ::flame::start_guard("prove_with_toom_cook_agorithm");
-
-        let start_algo4 = Instant::now();
         flame::start("input preprocessing");
 
         // Assertions
@@ -118,6 +113,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         //  3    Σ_y ∏_i p_i(1, y)                Σ_x ∏_i p_i(1, 0, x)                 +  Σ_x ∏_i p_i(1, 1, x)                   C[12] + C[15]
         // +-----------------------------------------------------------------------------------------------------------------------------------+
         //
+        flame::start("heigten");
+
         for _ in 2..=round_t {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
@@ -127,44 +124,18 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 matrix_int.heighten();
             }
         }
+        flame::end("heigten");
 
         flame::end("input preprocessing");
 
         let num_evals = r_degree + 1;
         let num_product_terms = num_evals.pow(round_t as u32);
 
-        // flame::start("mult bb");
-
-        // let start_field = Instant::now();
-        // // Pre-compute array (field operations)
-        // let mut precomputed_array_unused: Vec<BF> = Vec::with_capacity(num_product_terms);
-        // for j in 0..num_product_terms {
-        //     let mut product_terms_x: MatrixPolynomial<BF> =
-        //         MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings);
-
-        //     for i in 1..matrix_polynomials.len() {
-        //         let matrix_terms_x =
-        //             MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings);
-        //         product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x, mult_bb);
-        //     }
-
-        //     assert_eq!(product_terms_x.no_of_rows, 1);
-        //     let sum_over_x = product_terms_x.evaluation_rows[0]
-        //         .iter()
-        //         .fold(BF::zero(), |acc, px| acc + px);
-        //     precomputed_array_unused.push(sum_over_x);
-        // }
-        // let elapsed_field = start_field.elapsed();
-        // flame::end("mult bb");
-        // println!("    witness_mults (bb): {:?}", elapsed_field);
-
         flame::start("mult int");
-        let start_int = Instant::now();
+
         // Pre-compute array (int operations)
         let mut precomputed_array_int: Vec<i64> = Vec::with_capacity(num_product_terms);
         for j in 0..num_product_terms {
-            // println!("    j = {}", j);
-            let start_a = Instant::now();
             let mut product_terms_x: MatrixPolynomialInt<i64> =
                 MatrixPolynomialInt::compute_merkle_roots(
                     &matrix_polynomials_int[0],
@@ -180,26 +151,17 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 );
                 product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x);
             }
-            let elapsed_a = start_a.elapsed();
-            // println!("      compute_merkle_roots: {:?}", elapsed_a);
 
             assert_eq!(product_terms_x.no_of_rows, 1);
-            let start_b = Instant::now();
             let sum_over_x = product_terms_x.evaluation_rows[0]
                 .iter()
                 .fold(0i64, |acc, px| acc + px);
             precomputed_array_int.push(sum_over_x);
-            let elapsed_b = start_b.elapsed();
-            // println!("      sum: {:?}", elapsed_b);
         }
 
         flame::end("mult int");
-
-        let elapsed_int = start_int.elapsed();
-        // println!("    witness_mults (int): {:?}", elapsed_int);
-
         flame::start("convert");
-        let start_convert = Instant::now();
+
         let precomputed_array: Vec<BF> = precomputed_array_int
             .iter()
             .map(|&p| {
@@ -210,13 +172,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .collect();
 
         flame::end("convert");
-
-        // println!("int array:\n{:?}", precomputed_array_int);
-        let elapsed_convert = start_convert.elapsed();
-        // println!("    convert (int to bb): {:?}", elapsed_convert);
-
-        // assert_eq!(precomputed_array_unused, precomputed_array);
-
         flame::start("pre-computed sums");
 
         // Accumulate pre-computed values to be used in rounds.
@@ -389,8 +344,5 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
         }
         flame::end("remaining_rounds");
-
-        let end = start_algo4.elapsed();
-        println!("prove_algo4: {:?}", end);
     }
 }

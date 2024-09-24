@@ -1,7 +1,6 @@
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
-use std::time::Instant;
 
 use crate::data_structures::{
     bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt,
@@ -27,8 +26,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
-        let start = Instant::now();
-
+        flame::start("input processing");
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
         // Round 1:
@@ -42,7 +40,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // row 1: [ p(1, 1, x) ]
         //
         // and so on.
-        let start_1 = Instant::now();
         let r_degree = prover_state.max_multiplicands;
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
         let mut matrix_polynomials_int: Vec<MatrixPolynomialInt<i64>> =
@@ -68,46 +65,24 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 matrix_int.heighten();
             }
         }
-        let elapsed_1 = start_1.elapsed();
-        // println!("    witness_restructure: {:?}", elapsed_1);
 
-        // let start_bb = Instant::now();
-
-        // let precomputed_array_unused =
-        //     MatrixPolynomial::tensor_inner_product::<_>(&matrix_polynomials, &mult_bb);
-
-        // let elapsed_bb = start_bb.elapsed();
-        // println!("    witness_mults (bb): {:?}", elapsed_bb);
-        // assert_eq!(
-        //     precomputed_array_unused.len(),
-        //     (1 as usize) << (round_t * r_degree)
-        // );
-
-        // println!("array_bf = {:?}", precomputed_array);
-
-        let start_int = Instant::now();
+        flame::end("input processing");
+        flame::start("int mults");
 
         let precomputed_array_int =
             MatrixPolynomialInt::tensor_inner_product(&matrix_polynomials_int);
 
-        let elapsed_int = start_int.elapsed();
-        // println!("    witness_mults (int): {:?}", elapsed_int);
         assert_eq!(
             precomputed_array_int.len(),
             (1 as usize) << (round_t * r_degree)
         );
 
-        let start_2 = Instant::now();
         let precomputed_array: Vec<BF> = precomputed_array_int
             .iter()
             .map(|p| BF::from(*p as u64))
             .collect();
-        let elapsed_2 = start_2.elapsed();
-        // println!("    witness_int_to_field: {:?}", elapsed_2);
 
-        // assert_eq!(precomputed_array_from, precomputed_array);
-
-        // println!("array_int = {:?}", precomputed_array_int);
+        flame::end("int mults");
 
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
@@ -121,7 +96,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let sum_power_t = (precomputed_array.len() - 1) / (two_power_t - 1);
         // Process first t rounds
         for round_num in 1..=round_t {
-            let start_fetch = Instant::now();
+            flame::start(format!("round_poly_{}", round_num));
             let round_size = (1 as usize) << (round_num * r_degree);
             let mut precomputed_array_for_this_round: Vec<BF> = vec![BF::zero(); round_size];
 
@@ -135,10 +110,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 }
             }
 
-            let elapsed_fetch = start_fetch.elapsed();
-            // println!("    round_{}_fetch_witness: {:?}", round_num, elapsed_fetch);
-
-            let start_chal = Instant::now();
             // Compute challenge terms for 2^{r * d - 1} terms
             let mut gamma_matrix = challenge_matrix_polynomial.clone();
             for _ in 1..r_degree {
@@ -146,16 +117,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     gamma_matrix.tensor_hadamard_product(&challenge_matrix_polynomial, &mult_ee);
             }
 
-            let elapsed_chal = start_chal.elapsed();
-            // println!(
-            //     "    round_{}_comp_challenges (ee): {:?}",
-            //     round_num, elapsed_chal
-            // );
-
             // Combine precomputed_array_for_this_round[i] and precomputed_array_for_this_round[i + 1]
             // substituting X = k.
             for k in 0..(r_degree + 1) as u64 {
-                let start_round_k_scalar = Instant::now();
                 // Compute scalar vector:
                 // For d = 2: [(1 - k)²,  (1 - k)k,  k(1 - k), k²]
                 // For d = 3: [(1 - k)³,  (1 - k)²k,  (1 - k)k(1 - k),  (1 - k)k²,  k(1 - k)², k(1 - k)k, k²(1 - k), k³]
@@ -172,13 +136,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 let two_pow_degree = (1 as usize) << r_degree;
                 assert_eq!(scalar_matrix.no_of_columns, 1);
                 assert_eq!(scalar_matrix.no_of_rows, two_pow_degree);
-                let elapsed_round_k_scalar = start_round_k_scalar.elapsed();
-                // println!(
-                //     "    round_{}[{}]_scalar: {:?}",
-                //     round_num, k, elapsed_round_k_scalar
-                // );
 
-                let start_round_k_acc = Instant::now();
                 for (idx, challenge_multiplicand) in gamma_matrix.evaluation_rows.iter().enumerate()
                 {
                     let mut scalar_accumulator = BF::zero();
@@ -201,17 +159,12 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                         mult_be(&scalar_accumulator, &challenge_multiplicand[0]);
                 }
 
-                let elapsed_round_k_acc = start_round_k_acc.elapsed();
-                // println!(
-                //     "    round_{}[{}]_accumulation (be): {:?}",
-                //     round_num, k, elapsed_round_k_acc
-                // );
-
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
             }
+            flame::end(format!("round_poly_{}", round_num));
 
-            let start_round_k_alpha = Instant::now();
+            flame::start(format!("round_challenge_{}", round_num));
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
@@ -226,13 +179,9 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 b"challenge_nextround",
             );
 
-            let elapsed_round_k_alpha = start_round_k_alpha.elapsed();
-            // println!(
-            //     "    round_{}_sample_challenge: {:?}",
-            //     round_num, elapsed_round_k_alpha
-            // );
+            flame::end(format!("round_challenge_{}", round_num));
 
-            let start_round_k_update_chal = Instant::now();
+            flame::start(format!("round_challenge_update_{}", round_num));
 
             // Update challenge matrix with new challenge
             let challenge_tuple =
@@ -241,14 +190,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
-            let elapsed_round_k_update_chal = start_round_k_update_chal.elapsed();
-            // println!(
-            //     "    round_{}_update_challenge (ee): {:?}",
-            //     round_num, elapsed_round_k_update_chal
-            // );
+            flame::end(format!("round_challenge_update_{}", round_num));
         }
 
-        let start_rem_rounds = Instant::now();
+        flame::start("remaining_rounds");
 
         // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
         // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
@@ -274,11 +219,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
-
-        let elapsed_rem_rounds = start_rem_rounds.elapsed();
-        // println!("    rem_rounds: {:?}", elapsed_rem_rounds);
-
-        let end = start.elapsed();
-        println!("prove_algo3: {:?}", end);
+        flame::end("remaining_rounds");
     }
 }
