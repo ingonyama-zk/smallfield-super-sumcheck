@@ -140,7 +140,7 @@ mod fq_tests {
     #[rstest]
     fn check_sumcheck_product_with_threshold(
         #[values(16, 18, 20, 22, 24, 26)] nv: usize,
-        #[values(3)] degree: usize,
+        #[values(2, 3)] degree: usize,
         #[values(1, 2, 3, 4)] round_t: usize,
         #[values(WitnessType::U8)] witness_type: WitnessType,
     ) {

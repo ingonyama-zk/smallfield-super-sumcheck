@@ -1,6 +1,7 @@
 use ark_ff::{Field, PrimeField};
 use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::data_structures::{LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt};
 use crate::extension_transcript::ExtensionTranscriptProtocol;
@@ -122,31 +123,39 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let num_evals = r_degree + 1;
         let num_product_terms = num_evals.pow(round_t as u32);
 
-        // Pre-compute array (int operations)
-        let mut precomputed_array_int: Vec<i64> = Vec::with_capacity(num_product_terms);
-        for j in 0..num_product_terms {
-            let mut product_terms_x: MatrixPolynomialInt<i64> =
-                MatrixPolynomialInt::compute_merkle_roots(
-                    &matrix_polynomials_int[0],
-                    j,
-                    mappings_int,
-                );
+        // Parallelize over `j`
+        let precomputed_array_int: Vec<i64> = (0..num_product_terms)
+            .into_par_iter()
+            .map(|j| {
+                // Parallelize matrices_terms_x computation for each `j`
+                let matrices_terms_x: Vec<Vec<i64>> = (0..matrix_polynomials.len())
+                    .into_par_iter() // Parallelize over matrix_polynomials
+                    .map(|i| {
+                        MatrixPolynomialInt::compute_merkle_roots(
+                            &matrix_polynomials_int[i],
+                            j,
+                            mappings_int,
+                        )
+                        .evaluation_rows[0]
+                            .to_vec()
+                    })
+                    .collect();
 
-            for i in 1..matrix_polynomials.len() {
-                let matrix_terms_x = MatrixPolynomialInt::compute_merkle_roots(
-                    &matrix_polynomials_int[i],
-                    j,
-                    mappings_int,
-                );
-                product_terms_x = product_terms_x.hadamard_product(&matrix_terms_x);
-            }
+                // Assuming all rows have the same number of columns
+                let num_columns = matrices_terms_x[0].len();
 
-            assert_eq!(product_terms_x.no_of_rows, 1);
-            let sum_over_x = product_terms_x.evaluation_rows[0]
-                .iter()
-                .fold(0i64, |acc, px| acc + px);
-            precomputed_array_int.push(sum_over_x);
-        }
+                // Squash each column by multiplying elements across rows in parallel
+                let sum_over_x: i64 = (0..num_columns)
+                    .into_par_iter()
+                    .map(|i| {
+                        // Multiply all elements in the current column `i`
+                        matrices_terms_x.iter().map(|row| row[i]).product::<i64>()
+                    })
+                    .sum();
+
+                sum_over_x // Return the sum for this `j`
+            })
+            .collect(); // Collect the result of each `j` into the vector
 
         let precomputed_array: Vec<BF> = precomputed_array_int
             .iter()

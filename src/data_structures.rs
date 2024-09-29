@@ -374,8 +374,8 @@ where
                     let matrix_row = &matrices[j].evaluation_rows[index];
 
                     local_output
-                        .iter_mut()
-                        .zip(matrix_row.iter())
+                        .par_iter_mut()
+                        .zip(matrix_row.par_iter())
                         .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
                 }
 

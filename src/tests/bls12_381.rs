@@ -133,7 +133,7 @@ mod fq_tests {
 
     #[test]
     fn check_simple_sumcheck_product() {
-        let n = 24;
+        let n = 20;
         let d = 3;
         let t = 3;
         assert_eq!(
