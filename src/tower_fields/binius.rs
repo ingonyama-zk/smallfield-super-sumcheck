@@ -315,15 +315,47 @@ mod tests {
 
     #[test]
     fn test_mul() {
-        // TODO: add explanation of how this works
-        let field1 = BTF::new(2, Some(1)); // binary 10
-        let field2 = BTF::new(3, Some(1)); // binary 11
-        let expected = BTF::new(1, Some(1)); // binary 01
+        //
+        // F4: [0, 1, x, x + 1]
+        // a = mx + c ==> a = (x)
+        // b = mx + c ==> b = (x + 1)
+        // a * b = x * (1 + x)
+        //       = x + x^2
+        //       = 1                  since (x^2 + x + 1 = 0)
+        //
+        let field1 = BTF::new(2, Some(1));
+        let field2 = BTF::new(3, Some(1));
+        let expected = BTF::new(1, Some(1));
         assert!(test_mul_helper(field1, field2, expected));
 
-        let field1 = BTF::new(13, Some(2)); // binary 10
-        let field2 = BTF::new(11, Some(2)); // binary 11
-        let expected = BTF::new(10, Some(2)); // binary 11
+        // F4: [0, 1, x, x + 1]
+        //
+        // F8: my + c such that m and c \in F4
+        // 13 ==> 1101 ==> (3 || 1) ==> (1) + y * (x + 1)
+        // 11 ==> 1011 ==> (2 || 3) ==> (x + 1) + y * (x)
+        //
+        // 13 * 11 = ((1) + y * (x + 1)) * ((x + 1) + y * (x))
+        //         = (x + 1) +
+        //           (x + 1)^2 * y +
+        //           y * x  +
+        //           y^2 * (x + 1) * x
+        //         = (x + 1) +
+        //           (x^2 + x + 1 + x) * y +
+        //           y * x +
+        //           y^2 * (x^2 + x)
+        //
+        // Since x^2 + x + 1 = 0 and y^2 + yx + 1 = 0
+        //
+        // 13 * 11 = (x + 1) +
+        //           x * y +
+        //           y * x
+        //           y^2
+        //         = (x + 1) + y * x + 1
+        //         = x + y * x
+        //         ==> (2 || 2) ==> 1010 ==> 10 (decimal)
+        let field1 = BTF::new(13, Some(2));
+        let field2 = BTF::new(11, Some(2));
+        let expected = BTF::new(10, Some(2));
         assert!(test_mul_helper(field1, field2, expected));
     }
 
