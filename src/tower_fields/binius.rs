@@ -3,6 +3,8 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub},
 };
 
+use super::TowerField;
+
 #[derive(Clone, Eq)]
 pub struct BiniusTowerField {
     val: u128,         // To store the value in the field
@@ -10,9 +12,9 @@ pub struct BiniusTowerField {
     num_bits: usize,   // Number of bits based on num_levels
 }
 
-impl BiniusTowerField {
+impl TowerField for BiniusTowerField {
     // Constructor
-    pub fn new(val: u128, num_levels: Option<usize>) -> Self {
+    fn new(val: u128, num_levels: Option<usize>) -> Self {
         let computed_levels = match num_levels {
             Some(levels) => levels,
             None => {
@@ -32,17 +34,17 @@ impl BiniusTowerField {
     }
 
     // Zero function
-    pub fn zero(&mut self) {
+    fn zero(&mut self) {
         self.val = 0;
     }
 
     // One function
-    pub fn one(&mut self) {
+    fn one(&mut self) {
         self.val = 1;
     }
 
     // Extend the number of levels in the tower
-    pub fn extend_num_levels(&mut self, new_levels: usize) {
+    fn extend_num_levels(&mut self, new_levels: usize) {
         assert!(self.num_levels <= new_levels);
         self.set_num_levels(new_levels);
     }
@@ -54,17 +56,17 @@ impl BiniusTowerField {
     }
 
     // Get the value (equivalent to val method)
-    pub fn get_val(&self) -> u128 {
+    fn get_val(&self) -> u128 {
         self.val
     }
 
     // Return the binary representation of the value, padded with zeros
-    pub fn bin(&self) -> String {
+    fn bin(&self) -> String {
         format!("{:0width$b}", self.val, width = self.num_bits)
     }
 
     // Split the value into high and low parts
-    pub fn split(&self) -> (BiniusTowerField, BiniusTowerField) {
+    fn split(&self) -> (BiniusTowerField, BiniusTowerField) {
         let bin_val = self.bin();
         let half_bits = self.num_bits / 2;
 
@@ -78,7 +80,7 @@ impl BiniusTowerField {
     }
 
     // Equality check
-    pub fn equals(&self, other: &BiniusTowerField) -> bool {
+    fn equals(&self, other: &BiniusTowerField) -> bool {
         self.val == other.get_val()
     }
 
@@ -261,6 +263,7 @@ impl PartialEq for BiniusTowerField {
 #[cfg(test)]
 mod tests {
     use super::BiniusTowerField as BTF;
+    use crate::tower_fields::TowerField;
 
     fn test_mul_helper(a: BTF, b: BTF, expected: BTF) -> bool {
         let result = a * b;
