@@ -43,3 +43,8 @@ criterion = "0.5.1"
 name = "smallfield_sumcheck_bn254_bench"
 path = "benches/bn254.rs"
 harness = false
+
+[[bench]]
+name = "btf_bench"
+path = "benches/binius_tower_field.rs"
+harness = false
