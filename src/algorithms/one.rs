@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use ark_ff::{Field, PrimeField};
 use merlin::Transcript;
 
@@ -89,7 +87,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
     {
-        let start_algo1 = Instant::now();
         // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
         let r_degree = prover_state.max_multiplicands;
 
@@ -132,7 +129,5 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
-        let end = start_algo1.elapsed();
-        println!("prove_algo1: {:?}", end);
     }
 }

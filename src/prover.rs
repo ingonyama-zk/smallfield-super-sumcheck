@@ -137,8 +137,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
-        flame::start("prove");
-
         // Initiate the transcript with the protocol name
         <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
@@ -215,7 +213,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 ef_combine_function,
             ),
         }
-        flame::end("prove");
 
         SumcheckProof {
             num_vars: prover_state.num_vars,

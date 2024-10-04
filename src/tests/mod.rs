@@ -1,5 +1,6 @@
 mod baby_bear;
 mod bls12_381;
+mod bn254;
 pub mod fields;
 mod goldilocks;
 // mod simple_tests;

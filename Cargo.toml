@@ -16,6 +16,7 @@ blake2 = { version = "0.10.6", default-features = false }
 hashbrown = { version = "0.14.0" }
 ark-ec = { version = "0.4.2" }
 ark-bls12-381 = { version = "0.4.0" }
+ark-bn254 = "0.4.0"
 rand = "0.8"
 merlin = { version = "3.0.0" }
 itertools = "0.12.1"
@@ -33,7 +34,12 @@ criterion = "0.5.1"
 # path = "benches/bls12_381.rs"
 # harness = false
 
+# [[bench]]
+# name = "smallfield_sumcheck_babybear_bench"
+# path = "benches/baby_bear.rs"
+# harness = false
+
 [[bench]]
-name = "smallfield_sumcheck_babybear_bench"
-path = "benches/baby_bear.rs"
+name = "smallfield_sumcheck_bn254_bench"
+path = "benches/bn254.rs"
 harness = false
