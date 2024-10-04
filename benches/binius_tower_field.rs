@@ -65,6 +65,7 @@ fn bench_mul(c: &mut Criterion) {
     btf_mul_bench(c, 1, 1);
     btf_mul_bench(c, 2, 2);
     btf_mul_bench(c, 6, 6);
+    btf_mul_bench(c, 7, 7);
     btf_mul_bench(c, 1, 6);
 }
 

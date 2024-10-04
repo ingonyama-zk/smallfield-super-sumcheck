@@ -23,11 +23,17 @@ impl TowerField for BiniusTowerField {
             }
         };
 
+        assert!(computed_levels < 8, "Number of bits cannot exceed 128.");
+
         let num_bits = 1 << computed_levels;
-        let modulus = 1u128 << num_bits;
+        let modulus_mask = if num_bits >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << num_bits) - 1u128
+        };
 
         BiniusTowerField {
-            val: val % modulus,
+            val: val & modulus_mask,
             num_levels: computed_levels,
             num_bits,
         }
@@ -262,12 +268,58 @@ impl PartialEq for BiniusTowerField {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
+    use rand::Rng;
+
     use super::BiniusTowerField as BTF;
     use crate::tower_fields::TowerField;
 
     fn test_mul_helper(a: BTF, b: BTF, expected: BTF) -> bool {
         let result = a * b;
         result == expected
+    }
+
+    // Function to generate a random `BiniusTowerField` with specified `num_levels`
+    fn random_binius_tower_field(num_levels: usize) -> BTF {
+        let mut rng = rand::thread_rng();
+        let random_val = rng.gen::<u128>();
+        BTF::new(random_val, Some(num_levels))
+    }
+
+    #[test]
+    fn test_mult_bb_ee() {
+        const N: u32 = 10000; // Number of iterations
+        let mut total_time = 0u128;
+
+        for _ in 0..N {
+            let a = random_binius_tower_field(0);
+            let b = random_binius_tower_field(0);
+
+            let start_time = Instant::now();
+            let _a_mul_b = a.clone() * b.clone();
+            let duration = start_time.elapsed();
+
+            total_time += duration.as_nanos(); // Add the elapsed time to the total
+        }
+
+        let avg_time = (total_time as f64) / N as f64;
+        println!("0 bit - 0 bit mult: {} ns", avg_time);
+
+        total_time = 0;
+        for _ in 0..N {
+            let a = random_binius_tower_field(7);
+            let b = random_binius_tower_field(7);
+
+            let start_time = Instant::now();
+            let _a_mul_b = a.clone() * b.clone();
+            let duration = start_time.elapsed();
+
+            total_time += duration.as_nanos();
+        }
+
+        let avg_time = (total_time as f64) / N as f64;
+        println!("128 bit - 128 bit mult: {} ns", avg_time);
     }
 
     #[test]
