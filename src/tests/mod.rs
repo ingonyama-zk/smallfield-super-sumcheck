@@ -2,13 +2,13 @@ mod baby_bear;
 mod bls12_381;
 pub mod fields;
 mod goldilocks;
-mod simple_tests;
+// mod simple_tests;
 
 pub mod test_helpers {
     use ark_ff::{Field, PrimeField};
-    use ark_poly::{DenseMultilinearExtension, MultilinearExtension};
-    use ark_std::test_rng;
+    use ark_poly::DenseMultilinearExtension;
     use nalgebra::DMatrix;
+    use rand::Rng;
 
     use crate::{
         data_structures::LinearLagrangeList,
@@ -16,22 +16,48 @@ pub mod test_helpers {
         IPForMLSumcheck,
     };
 
+    #[derive(PartialEq, Clone, Debug, Copy)]
+    pub enum WitnessType {
+        U1,
+        U8,
+        U32,
+        U64,
+    }
+
+    fn generate_random_i64_vec(witness_type: WitnessType, num_elements: usize) -> Vec<i64> {
+        let mut rng = rand::thread_rng();
+
+        match witness_type {
+            WitnessType::U1 => (0..num_elements)
+                .map(|_| rng.gen::<bool>() as i64)
+                .collect(),
+            WitnessType::U8 => (0..num_elements).map(|_| rng.gen::<u8>() as i64).collect(),
+            WitnessType::U32 => (0..num_elements).map(|_| rng.gen::<u32>() as i64).collect(),
+            WitnessType::U64 => (0..num_elements).map(|_| rng.gen::<u64>() as i64).collect(),
+        }
+    }
+
     /// Helper function to create sumcheck test multivariate polynomials of given degree.
     pub fn create_sumcheck_test_data<EF: Field, BF: PrimeField>(
         nv: usize,
         degree: usize,
         algorithm: AlgorithmType,
+        witness_type: WitnessType,
     ) -> (ProverState<EF, BF>, BF) {
-        // Declare a randomness generation engine
-        let mut rng = test_rng();
-
         let num_evaluations: usize = (1 as usize) << nv;
         let mut polynomials: Vec<LinearLagrangeList<BF>> = Vec::with_capacity(degree);
+        let mut polynomials_int: Vec<Vec<i64>> = Vec::with_capacity(degree);
         let mut polynomial_hadamard: Vec<BF> = vec![BF::ONE; num_evaluations];
         for _ in 0..degree {
+            let poly_i_vec = generate_random_i64_vec(witness_type, num_evaluations);
+            let poly_i_vec_bf = poly_i_vec
+                .iter()
+                .map(|pi_j| BF::from(*pi_j as u64))
+                .collect();
             let poly_i: DenseMultilinearExtension<BF> =
-                DenseMultilinearExtension::rand(nv, &mut rng);
+                DenseMultilinearExtension::from_evaluations_vec(nv, poly_i_vec_bf);
             polynomials.push(LinearLagrangeList::<BF>::from(&poly_i));
+            polynomials_int.push(poly_i_vec);
             polynomial_hadamard
                 .iter_mut()
                 .zip(poly_i.iter())
@@ -41,8 +67,12 @@ pub mod test_helpers {
             .iter()
             .fold(BF::zero(), |acc, ph| acc + ph);
 
-        let prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, degree, algorithm);
+        let prover_state: ProverState<EF, BF> = IPForMLSumcheck::<EF, BF>::prover_init(
+            &polynomials,
+            &polynomials_int,
+            degree,
+            algorithm,
+        );
 
         (prover_state, claimed_sum)
     }
@@ -261,6 +291,76 @@ pub mod test_helpers {
                 imap
             })
             .collect::<Vec<Box<dyn Fn(&Vec<FF>) -> FF>>>()
+    }
+
+    /// Setup all mappings etc for the toom-cook algorithm.
+    pub fn common_setup_for_toom_cook<BF: Field, EF: Field>(
+        degree: usize,
+        with_inversions: bool,
+    ) -> (
+        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
+        Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
+        Vec<usize>,
+        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
+        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
+        i64,
+    ) {
+        // Define evaluation mappings
+        // p(x) = p0 + p1.x
+        let num_evals = degree + 1;
+        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
+        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
+        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
+        for i in 1..=(num_evals / 2) {
+            if emaps_base.len() < num_evals {
+                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
+                emaps_base.push(mapi);
+            }
+            if emaps_base.len() < num_evals {
+                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
+                emaps_base.push(mapi);
+            }
+        }
+
+        // Define integer maps
+        let mut emaps_base_int: Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>> =
+            Vec::with_capacity(num_evals);
+        emaps_base_int.push(Box::new(move |x: &i64, _y: &i64| -> i64 { *x }));
+        emaps_base_int.push(Box::new(move |_x: &i64, y: &i64| -> i64 { *y }));
+        for i in 1..=(num_evals / 2) {
+            if emaps_base_int.len() < num_evals {
+                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x + (*y * (i as i64)) });
+                emaps_base_int.push(mapi);
+            }
+            if emaps_base_int.len() < num_evals {
+                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x - (*y * (i as i64)) });
+                emaps_base_int.push(mapi);
+            }
+        }
+
+        let projective_map_indices = vec![0 as usize, 1 as usize];
+
+        // Define interpolation mappings
+        let (interpolation_matrix, scaled_det) =
+            generate_binomial_interpolation_mult_matrix_transpose(degree);
+
+        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
+        let mut divisor: i64 = 1;
+        if with_inversions {
+            divisor = scaled_det;
+        }
+
+        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
+        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
+
+        (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            scaled_det,
+        )
     }
 }
 

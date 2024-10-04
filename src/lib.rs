@@ -6,6 +6,13 @@ pub mod tests;
 mod transcript;
 pub mod verifier;
 
+pub mod algorithms {
+    pub mod four;
+    pub mod one;
+    pub mod three;
+    pub mod two;
+}
+
 use ark_ff::{Field, PrimeField};
 use ark_std::marker::PhantomData;
 

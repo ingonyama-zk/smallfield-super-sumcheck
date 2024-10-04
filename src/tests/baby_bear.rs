@@ -1,22 +1,35 @@
 #[cfg(test)]
 mod fq4_tests {
+    use std::time::Instant;
+
     use crate::error::SumcheckError;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
+    use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
-    use crate::tests::test_helpers::generate_binomial_interpolation_mult_matrix_transpose;
-    use crate::tests::test_helpers::get_maps_from_matrix;
+    use crate::tests::test_helpers::WitnessType;
     use crate::IPForMLSumcheck;
 
     use ark_ff::Field;
     use ark_std::iterable::Iterable;
     use ark_std::vec::Vec;
     use merlin::Transcript;
+    use rand::Rng;
     use rstest::rstest;
 
     use crate::tests::fields::BabyBearFq;
     use crate::tests::fields::BabyBearFq4;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Define a global atomic counter
+    static BB_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    // Define a function to get the current call count
+    pub fn get_bb_count() -> usize {
+        BB_COUNT.load(Ordering::SeqCst)
+    }
 
     type BF = BabyBearFq;
     type EF = BabyBearFq4;
@@ -62,7 +75,11 @@ mod fq4_tests {
 
         // Multiplies a base field element to a base field element
         let mult_bb: Box<dyn Fn(&BF, &BF) -> BF + Sync> =
-            Box::new(|bb_element1: &BF, bb_element2: &BF| -> BF { bb_element1 * bb_element2 });
+            Box::new(|bb_element1: &BF, bb_element2: &BF| -> BF {
+                // Increment the counter
+                BB_COUNT.fetch_add(1, Ordering::SeqCst);
+                bb_element1 * bb_element2
+            });
 
         // Adds two extension field elements
         let add_ee: Box<dyn Fn(&EF, &EF) -> EF + Sync> =
@@ -89,10 +106,16 @@ mod fq4_tests {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone());
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
 
-        let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
-            setup_for_toom_cook(degree, with_inversions);
+        let (
+            emaps_base,
+            emaps_base_int,
+            projective_map_indices,
+            imaps_base,
+            imaps_ext,
+            mut scaled_det,
+        ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -108,10 +131,13 @@ mod fq4_tests {
             &mult_bb,
             Some(round_t),
             Some(&emaps_base),
+            Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
         );
+
+        println!("mult_bb was called {} times", get_bb_count());
 
         let mut round_t_v = round_t;
         if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
@@ -131,55 +157,65 @@ mod fq4_tests {
         (proof, result)
     }
 
-    /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn setup_for_toom_cook(
-        degree: usize,
-        with_inversions: bool,
-    ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
-        i64,
-    ) {
-        // Define evaluation mappings
-        // p(x) = p0 + p1.x
-        let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
-        emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
-        emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x + (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
-            if emaps_base.len() < num_evals {
-                let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
-                emaps_base.push(mapi);
-            }
+    #[test]
+    fn check_simple_sumcheck_product() {
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::Precomputation, false)
+                .1
+                .unwrap(),
+            true
+        );
+
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::Naive, false)
+                .1
+                .unwrap(),
+            true
+        );
+
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, 3, 5, AlgorithmType::ToomCook, false)
+                .1
+                .unwrap(),
+            true
+        );
+    }
+
+    #[test]
+    fn check_simple_mult() {
+        let mut input_1 = 68 as i16;
+        let multiplicand = 3 as i16;
+        let n = 10000;
+        let start = Instant::now();
+        for _ in 0..n {
+            input_1 = ((input_1 as i32) * (multiplicand as i32)) as i16;
         }
-        let projective_map_indices = vec![0 as usize, 1 as usize];
+        let elapsed = start.elapsed();
+        println!("time: {:?}", elapsed);
+        println!("input = {}", input_1);
+        println!("time per mult = {:?}", elapsed / n);
+    }
 
-        // Define interpolation mappings
-        let (interpolation_matrix, scaled_det) =
-            generate_binomial_interpolation_mult_matrix_transpose(degree);
+    #[test]
+    fn check_simple_mult_float() {
+        let mut rng = rand::thread_rng();
+        let num_elements = 100000;
+        let input_a: Vec<f64> = (0..num_elements).map(|_| rng.gen::<f64>()).collect();
+        let input_b: Vec<f64> = (0..num_elements).map(|_| rng.gen::<f64>()).collect();
 
-        // If inversions are allowed (makes the protocol less efficient), modify the divisor accordingly.
-        let mut divisor: i64 = 1;
-        if with_inversions {
-            divisor = scaled_det;
-        }
-
-        let imaps_base = get_maps_from_matrix::<BF>(&interpolation_matrix, divisor);
-        let imaps_ext = get_maps_from_matrix::<EF>(&interpolation_matrix, divisor);
-
-        (
-            emaps_base,
-            projective_map_indices,
-            imaps_base,
-            imaps_ext,
-            scaled_det,
-        )
+        let start = Instant::now();
+        let ip_ab: Vec<f64> = input_a
+            .iter()
+            .zip(input_b.iter())
+            .map(|(a, b)| a * b)
+            .collect();
+        let elapsed = start.elapsed();
+        println!("time: {:?}", elapsed);
+        // println!("out = {}", ip_ab[10]);
+        println!("time per mult = {:?}", elapsed / num_elements);
     }
 
     #[rstest]

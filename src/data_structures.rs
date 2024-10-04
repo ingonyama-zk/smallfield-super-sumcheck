@@ -1,4 +1,11 @@
-use std::vec;
+use std::{
+    ops::{Add, AddAssign, Mul, MulAssign, Sub},
+    vec,
+};
+
+use num::One;
+use num::Zero;
+use rayon::prelude::*;
 
 use ark_std::{
     fmt::{self, Formatter},
@@ -165,6 +172,22 @@ impl<F: Field> LinearLagrangeList<F> {
         }
     }
 
+    pub fn to_vector(&self) -> Vec<F> {
+        // Allocate space for the output vector
+        let mut vec = Vec::with_capacity(self.size * 2);
+
+        // First, extract the `even` elements
+        for poly in &self.list {
+            vec.push(poly.even.clone());
+        }
+
+        // Then, extract the `odd` elements
+        for poly in &self.list {
+            vec.push(poly.odd.clone());
+        }
+        vec
+    }
+
     pub fn convert<OtherF, T>(self: &LinearLagrangeList<F>, to_ef: &T) -> LinearLagrangeList<OtherF>
     where
         OtherF: Field,
@@ -268,6 +291,212 @@ pub struct MatrixPolynomial<F: Field> {
     pub no_of_rows: usize,
     pub no_of_columns: usize,
     pub evaluation_rows: Vec<Vec<F>>,
+}
+
+///
+/// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix (integer) form.
+///
+#[derive(Clone, PartialEq, Eq)]
+pub struct MatrixPolynomialInt<T> {
+    pub no_of_rows: usize,
+    pub no_of_columns: usize,
+    pub evaluation_rows: Vec<Vec<T>>,
+}
+
+impl<T> MatrixPolynomialInt<T>
+where
+    T: Clone
+        + Copy
+        + Add<Output = T>
+        + Mul<Output = T>
+        + MulAssign
+        + AddAssign
+        + Sub<Output = T>
+        + Zero
+        + One
+        + Send
+        + Sync,
+{
+    pub fn from_evaluations(input_polynomial: &Vec<T>) -> Self {
+        let n = input_polynomial.len();
+        let mid_point = n / 2;
+        let (first_half, second_half) = input_polynomial.split_at(mid_point);
+
+        MatrixPolynomialInt {
+            no_of_rows: 2,
+            no_of_columns: mid_point,
+            evaluation_rows: vec![first_half.to_vec(), second_half.to_vec()],
+        }
+    }
+
+    pub fn heighten(&mut self) {
+        // Update the dimensions of the original matrix
+        self.no_of_rows *= 2;
+        self.no_of_columns /= 2;
+        let mid_point = self.no_of_columns;
+        let end_point = mid_point * 2;
+
+        for row_index in 0..(self.no_of_rows / 2) {
+            let vector_to_add = self.evaluation_rows[2 * row_index][mid_point..end_point].to_vec();
+            self.evaluation_rows
+                .insert(2 * row_index + 1, vector_to_add);
+            self.evaluation_rows[2 * row_index].truncate(mid_point);
+        }
+    }
+
+    pub fn tensor_inner_product(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<T>
+    where
+        T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        let log_row_count = log2(row_count) as usize;
+        let output_bit_len = log_row_count * d;
+        let output_len = 1 << output_bit_len;
+
+        // Use parallel iterator to compute output
+        (0..output_len)
+            .into_par_iter()
+            .map(|i| {
+                // Compute the tensor product for each `i` in parallel
+                let mut local_output = vec![T::one(); col_count];
+                for j in 0..d {
+                    let offset = (d - j - 1) * log_row_count;
+                    let index = (i >> offset) & (row_count - 1);
+                    let matrix_row = &matrices[j].evaluation_rows[index];
+
+                    local_output
+                        .iter_mut()
+                        .zip(matrix_row.iter())
+                        .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
+                }
+
+                // Sum up the local output
+                local_output.iter().copied().sum()
+            })
+            .collect()
+    }
+
+    pub fn compute_merkle_roots(
+        input_polynomial: &MatrixPolynomialInt<T>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&T, &T) -> T + Send + Sync>>,
+    ) -> MatrixPolynomialInt<T> {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        // bitmask: (d + 1)-bit mask
+        let num_maps = mappings.len();
+        let depth = log2(input_polynomial.no_of_rows) as usize;
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut output = MatrixPolynomialInt {
+            no_of_rows: 1,
+            no_of_columns: input_polynomial.no_of_columns,
+            evaluation_rows: vec![Vec::with_capacity(input_polynomial.no_of_columns); 1],
+        };
+
+        // Parallelize the outer loop over x
+        output.evaluation_rows[0] = (0..input_polynomial.no_of_columns)
+            .into_par_iter() // Use parallel iterator
+            .map(|x| {
+                let mut layer_values: Vec<T> = input_polynomial
+                    .evaluation_rows
+                    .iter()
+                    .map(|row| row[x].clone()) // Use clone if T doesn't implement Copy
+                    .collect();
+
+                for layer in 1..=depth {
+                    let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
+                    let mapping_for_this_layer = &mappings[j_layer];
+
+                    let layer_size = 1 << (depth - layer);
+                    for i in 0..layer_size {
+                        let left = &layer_values[2 * i];
+                        let right = &layer_values[2 * i + 1];
+                        layer_values[i] = mapping_for_this_layer(left, right);
+                    }
+                    layer_values.truncate(layer_size);
+                }
+                layer_values[0].clone() // Return the root value for this x
+            })
+            .collect();
+        output
+    }
+
+    pub fn hadamard_product(&self, rhs: &MatrixPolynomialInt<T>) -> MatrixPolynomialInt<T> {
+        assert_eq!(self.no_of_columns, rhs.no_of_columns);
+        assert_eq!(self.no_of_rows, rhs.no_of_rows);
+
+        let mut output = MatrixPolynomialInt {
+            no_of_rows: self.no_of_rows,
+            no_of_columns: self.no_of_columns,
+            evaluation_rows: Vec::with_capacity(self.no_of_rows),
+        };
+
+        for i in 0..self.no_of_rows {
+            let left_vec: &Vec<T> = &self.evaluation_rows[i];
+            let right_vec: &Vec<T> = &rhs.evaluation_rows[i];
+            let left_right_hadamard: Vec<T> = left_vec
+                .iter()
+                .zip(right_vec.iter())
+                .map(|(&l, &r)| l * r)
+                .collect();
+            output.evaluation_rows.push(left_right_hadamard);
+        }
+        output
+    }
+
+    pub fn merkle_sums(
+        input: &Vec<T>,
+        num_children: usize,
+        indices_to_combine: &Vec<usize>,
+    ) -> Vec<Vec<T>> {
+        let input_size = input.len();
+        let depth: usize = input_size.ilog(num_children) as usize;
+        assert!(indices_to_combine.len() <= num_children);
+        assert_eq!(input_size, num_children.pow(depth as u32));
+
+        // Reserve space for the output in advance
+        let mut output: Vec<Vec<T>> = Vec::with_capacity(depth + 1);
+        output.push(input.clone());
+
+        let mut layer = input.clone();
+        let mut layer_size = input_size / num_children;
+
+        for _ in 1..=depth {
+            let mut next_layer = Vec::with_capacity(layer_size);
+
+            // Combine the selected indices for each node
+            for j in 0..layer_size {
+                let mut layer_value = T::zero();
+
+                // Precompute base index for performance
+                let base_idx = num_children * j;
+                for &idx in indices_to_combine.iter() {
+                    layer_value += layer[base_idx + idx];
+                }
+
+                next_layer.push(layer_value);
+            }
+
+            output.push(next_layer.clone());
+            layer = next_layer; // Move to the next layer
+            layer_size /= num_children; // Update the layer size
+        }
+        output.reverse();
+        output
+    }
 }
 
 impl<F: Field> MatrixPolynomial<F> {
