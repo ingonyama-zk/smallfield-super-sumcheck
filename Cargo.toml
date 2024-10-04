@@ -35,11 +35,13 @@ name = "smallfield_sumcheck_bench"
 path = "benches/bls12_381.rs"
 harness = false
 
-# [[bench]]
-# name = "smallfield_sumcheck_babybear_bench"
-# path = "benches/baby_bear.rs"
-# harness = false
+# Run using `cargo bench --bench smallfield_sumcheck_babybear_bench`
+[[bench]]
+name = "smallfield_sumcheck_babybear_bench"
+path = "benches/baby_bear.rs"
+harness = false
 
+# Run using `cargo bench --bench smallfield_sumcheck_bn254_bench`
 [[bench]]
 name = "smallfield_sumcheck_bn254_bench"
 path = "benches/bn254.rs"
