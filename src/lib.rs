@@ -13,6 +13,8 @@ pub mod algorithms {
     pub mod two;
 }
 
+pub mod tower_fields;
+
 use ark_ff::{Field, PrimeField};
 use ark_std::marker::PhantomData;
 
