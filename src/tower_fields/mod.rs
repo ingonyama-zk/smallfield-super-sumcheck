@@ -25,4 +25,5 @@ pub trait TowerField: Clone + Debug + Add + AddAssign + Sub + Mul + MulAssign + 
         b_lo: &Self,
         b_sum: &Self,
     ) -> Self;
+    fn inverse(&self) -> Option<Self>;
 }

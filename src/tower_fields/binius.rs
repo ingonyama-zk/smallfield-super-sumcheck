@@ -5,6 +5,11 @@ use std::{
 
 use super::TowerField;
 
+/// The constant lookup table for inverses in F(2^4)
+/// Elements 1 through 15 correspond to the field elements 1, ..., 15 in F(2^4)
+/// Invserse of 0 should throw an error.
+const F2_4_INVERSE: [u128; 15] = [1, 3, 2, 6, 14, 4, 15, 13, 10, 9, 12, 11, 8, 5, 7];
+
 #[derive(Clone, Eq)]
 pub struct BiniusTowerField {
     val: u128,         // To store the value in the field
@@ -88,6 +93,38 @@ impl TowerField for BiniusTowerField {
     // Equality check
     fn equals(&self, other: &BiniusTowerField) -> bool {
         self.val == other.get_val()
+    }
+
+    fn inverse(&self) -> Option<Self> {
+        // Inverse of 0 doesn't exist, exit right away.
+        if self.equals(&BiniusTowerField::new(0u128, Some(0))) {
+            return None;
+        }
+
+        // Base case: 4-bit inverses are stored in a lookup table.
+        if self.num_levels <= 2 {
+            return Some(BiniusTowerField::new(
+                F2_4_INVERSE[self.val as usize - 1],
+                Some(2),
+            ));
+        }
+
+        // Recursion:
+        let (a_hi, a_lo) = self.split();
+        let two_pow_k = Self::new(1 << (self.num_bits / 2), Some(self.num_levels));
+        let two_pow_k_minus_one = Self::new(1 << (self.num_bits / 4), Some(self.num_levels - 1));
+
+        // a = a_hi * x_k  +  a_lo
+        // a_hi_next = a_hi * x_k
+        // a_lo_next = a_hi * x_{k - 1}  +  a_lo
+        let a_hi_next = a_hi.clone() * two_pow_k;
+        let a_lo_next = a_lo.clone() + a_hi.clone() * two_pow_k_minus_one;
+
+        // Δ = a_lo * a_lo_next + a_hi^2
+        let delta = a_lo.clone() * a_lo_next.clone() + a_hi.clone() * a_hi.clone();
+        let delta_inverse = delta.inverse().unwrap();
+
+        return Some(delta_inverse * (a_hi_next + a_lo_next));
     }
 
     fn mul_abstract(
@@ -260,6 +297,7 @@ impl PartialEq<u128> for BiniusTowerField {
     }
 }
 
+// TODO: Must also check num_levels and num_bits
 impl PartialEq for BiniusTowerField {
     fn eq(&self, other: &Self) -> bool {
         self.val == other.get_val()
@@ -366,6 +404,57 @@ mod tests {
         let field2 = BTF::new(5, Some(2));
         let result = field1 - field2; // Alias of add, 3 XOR 5 = 6
         assert_eq!(result.val, 6);
+    }
+
+    #[test]
+    fn test_generate_inv_base_case() {
+        for j in 1..16 {
+            let field = BTF::new(j as u128, Some(2));
+            for i in 1..(1 << field.num_bits) {
+                let candidate = BTF::new(i as u128, Some(2));
+                if field.clone() * candidate.clone() == BTF::new(1, Some(2)) {
+                    println!("{}^(-1) = {}", field, candidate);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_inverse_for_zero() {
+        for i in 2..6 {
+            let zero_field = BTF::new(0u128, Some(i));
+            let result = zero_field.inverse();
+            assert!(result.is_none());
+        }
+    }
+
+    #[test]
+    fn test_inverse() {
+        let mut rng = rand::thread_rng();
+
+        for _ in 0..10 {
+            // Test for element in F(2^4)
+            let random_input_u16 = rng.gen_range(1..=((1 << 16) - 1));
+            let a = BTF::new(random_input_u16 as u128, Some(4));
+            let inv_a = a.inverse().expect("Inverse should exist");
+            let result = a.clone() * inv_a;
+            // TODO: use BTF::one()?
+            assert_eq!(result, BTF::new(1u128, Some(4)));
+
+            // Test for element in F(2^3)
+            let random_input_u8 = rng.gen_range(1..=((1 << 8) - 1));
+            let a = BTF::new(random_input_u8 as u128, Some(3));
+            let inv_a = a.inverse().expect("Inverse should exist");
+            let result = a.clone() * inv_a;
+            assert_eq!(result, BTF::new(1u128, Some(3)));
+
+            // Test for element in F(2^2)
+            let random_input_u4 = rng.gen_range(1..=((1 << 4) - 1));
+            let a = BTF::new(random_input_u4 as u128, Some(2));
+            let inv_a = a.inverse().expect("Inverse should exist");
+            let result = a.clone() * inv_a;
+            assert_eq!(result, BTF::new(1u128, Some(3)));
+        }
     }
 
     #[test]
