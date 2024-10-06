@@ -90,6 +90,15 @@ impl TowerField for BiniusTowerField {
         (hi, lo)
     }
 
+    // Joins high and low parts
+    fn join(&self, other: &Self) -> Self {
+        let hi = self.clone();
+        let lo = other.clone();
+        assert_eq!(hi.num_levels, lo.num_levels);
+        assert_eq!(hi.num_bits, lo.num_bits);
+        Self::new((hi.val << hi.num_bits) + lo.val, Some(hi.num_levels + 1))
+    }
+
     // Equality check
     fn equals(&self, other: &BiniusTowerField) -> bool {
         self.val == other.get_val()
@@ -111,20 +120,19 @@ impl TowerField for BiniusTowerField {
 
         // Recursion:
         let (a_hi, a_lo) = self.split();
-        let two_pow_k = Self::new(1 << (self.num_bits / 2), Some(self.num_levels));
         let two_pow_k_minus_one = Self::new(1 << (self.num_bits / 4), Some(self.num_levels - 1));
 
         // a = a_hi * x_k  +  a_lo
-        // a_hi_next = a_hi * x_k
         // a_lo_next = a_hi * x_{k - 1}  +  a_lo
-        let a_hi_next = a_hi.clone() * two_pow_k;
         let a_lo_next = a_lo.clone() + a_hi.clone() * two_pow_k_minus_one;
 
         // Δ = a_lo * a_lo_next + a_hi^2
         let delta = a_lo.clone() * a_lo_next.clone() + a_hi.clone() * a_hi.clone();
         let delta_inverse = delta.inverse().unwrap();
 
-        return Some(delta_inverse * (a_hi_next + a_lo_next));
+        let out_hi = delta_inverse.clone() * a_hi;
+        let out_lo = delta_inverse * a_lo_next;
+        Some(out_hi.join(&out_lo))
     }
 
     fn mul_abstract(
@@ -141,17 +149,16 @@ impl TowerField for BiniusTowerField {
         let mx_num_levels = mx.num_levels;
         let mx_num_bits = mx.num_bits;
         lo += mx.clone();
-        let lo_val = lo.val;
 
         // mx * 2^(mx.num_half_bits())
         mx = mx * Self::new(1 << (mx_num_bits / 2), Some(mx_num_levels));
 
         // Perform hi operations
         let mut hi = a_sum * b_sum; // hi = a_sum * b_sum
-        hi = hi + (lo + mx); // hi += lo + mx
+        hi = hi + (lo.clone() + mx); // hi += lo + mx
 
         // Concatenate hi and lo by shifting hi to make space for lo
-        Self::new((hi.val << hi.num_bits) + lo_val, Some(hi.num_levels + 1))
+        hi.join(&lo)
     }
 }
 

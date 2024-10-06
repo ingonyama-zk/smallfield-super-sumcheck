@@ -16,6 +16,7 @@ pub trait TowerField: Clone + Debug + Add + AddAssign + Sub + Mul + MulAssign + 
     fn get_val(&self) -> u128;
     fn bin(&self) -> String;
     fn split(&self) -> (Self, Self);
+    fn join(&self, other: &Self) -> Self;
     fn equals(&self, other: &Self) -> bool;
     fn mul_abstract(
         a_hi: &Self,
