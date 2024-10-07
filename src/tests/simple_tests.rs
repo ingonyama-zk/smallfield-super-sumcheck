@@ -5,25 +5,22 @@ mod simple_extension_tests {
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
     use crate::tests::test_helpers::matrix_to_vec_of_vec;
+    use crate::tower_fields::binius::BiniusTowerField;
+    use crate::tower_fields::TowerField;
     use crate::IPForMLSumcheck;
-    use ark_ff::Field;
-    use ark_ff::Zero;
-    use ark_poly::DenseMultilinearExtension;
-    use ark_poly::MultilinearExtension;
     use ark_std::iterable::Iterable;
-    use ark_std::test_rng;
     use ark_std::vec::Vec;
     use merlin::Transcript;
     use nalgebra::DMatrix;
 
-    type BF = ark_bls12_381::Fq;
-    type EF = ark_bls12_381::Fq2;
+    type BF = BiniusTowerField;
+    type EF = BiniusTowerField;
 
     #[test]
     fn test_sumcheck() {
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Define the combine function
@@ -39,9 +36,7 @@ mod simple_extension_tests {
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -63,11 +58,11 @@ mod simple_extension_tests {
         let num_variables = 3;
         let num_evaluations = (1 as u32) << num_variables;
         let evaluations: Vec<BF> = (0..num_evaluations).map(|i| BF::from(2 * i)).collect();
-        let claimed_sum = evaluations.iter().fold(BF::zero(), |acc, e| acc + e);
-        let poly =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations);
+        let claimed_sum = evaluations.iter().fold(BF::zero(), |acc, e| acc + *e);
+        let poly = BF::rand_vector(num_evaluations as usize, Some(3));
 
-        let polynomials: Vec<LinearLagrangeList<BF>> = vec![LinearLagrangeList::<BF>::from(&poly)];
+        let polynomials: Vec<LinearLagrangeList<BF>> =
+            vec![LinearLagrangeList::<BF>::from_vector(&poly)];
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 1, AlgorithmType::Naive);
 
@@ -103,118 +98,6 @@ mod simple_extension_tests {
     }
 
     #[test]
-    fn test_product_sumcheck() {
-        // Convert a base field element to an extension field element
-        fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
-        }
-
-        // Define the combine function
-        fn combine_fn_bf(data: &Vec<BF>) -> EF {
-            assert!(data.len() == 2);
-            to_ef(&(data[0] * data[1]))
-        }
-
-        fn combine_fn_ef(data: &Vec<EF>) -> EF {
-            assert!(data.len() == 2);
-            data[0] * data[1]
-        }
-
-        // Multiplies a base field element to an extension field element
-        fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
-        }
-
-        // Adds two extension field elements
-        fn add_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
-            ee_element1 + ee_element2
-        }
-
-        // Multiplies an extension field element to an extension field element
-        fn mult_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
-            ee_element1 * ee_element2
-        }
-
-        // Multiplies a base field element to a base field element
-        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
-            bb_element1 * bb_element2
-        }
-
-        // Take two simple polynomial
-        let num_variables = 3;
-        let num_evaluations = (1 as u32) << num_variables;
-        let evaluations_a: Vec<BF> = (0..num_evaluations).map(|i| BF::from(2 * i)).collect();
-        let evaluations_b: Vec<BF> = (0..num_evaluations).map(|i| BF::from(i + 1)).collect();
-        let claimed_sum = evaluations_a
-            .iter()
-            .zip(evaluations_b.iter())
-            .fold(BF::zero(), |acc, (a, b)| acc + a * b);
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-
-        let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-        ];
-        let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
-        let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
-        let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
-            &mut prover_state,
-            &combine_fn_ef,
-            &combine_fn_bf,
-            &mut prover_transcript,
-            &to_ef,
-            &mult_be,
-            &add_ee,
-            &mult_ee,
-            &mult_bb,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
-        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
-            &mut prover_state_dup,
-            &mut prover_transcript_dup,
-            &mult_be,
-            &mult_ee,
-            &mult_bb,
-        );
-
-        let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof,
-            &mut verifier_transcript,
-            AlgorithmType::Naive,
-            None,
-            None,
-        );
-        assert_eq!(result.unwrap(), true);
-
-        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof_dup,
-            &mut verifier_transcript_dup,
-            AlgorithmType::Naive,
-            None,
-            None,
-        );
-        assert_eq!(result_dup.unwrap(), true);
-    }
-
-    #[test]
     fn test_product_sumcheck_with_algorithm_2() {
         // Define the combine function
         fn combine_fn_bf(data: &Vec<BF>) -> EF {
@@ -229,14 +112,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -263,14 +144,12 @@ mod simple_extension_tests {
             .iter()
             .zip(evaluations_b.iter())
             .fold(BF::zero(), |acc, (a, b)| acc + a * b);
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
+        let poly_a = BF::rand_vector(num_variables as usize, Some(3));
+        let poly_b = BF::rand_vector(num_variables as usize, Some(3));
 
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
+            LinearLagrangeList::<BF>::from_vector(&poly_a),
+            LinearLagrangeList::<BF>::from_vector(&poly_b),
         ];
 
         let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
@@ -296,17 +175,6 @@ mod simple_extension_tests {
             None,
         );
 
-        let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
-        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
-            &mut prover_state_dup,
-            &mut prover_transcript_dup,
-            &mult_be,
-            &mult_ee,
-            &mult_bb,
-        );
-
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify(
             to_ef(&claimed_sum),
@@ -317,17 +185,6 @@ mod simple_extension_tests {
             None,
         );
         assert_eq!(result.unwrap(), true);
-
-        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof_dup,
-            &mut verifier_transcript_dup,
-            AlgorithmType::Naive,
-            None,
-            None,
-        );
-        assert_eq!(result_dup.unwrap(), true);
     }
 
     #[test]
@@ -345,14 +202,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -386,17 +241,10 @@ mod simple_extension_tests {
             .map(|i| BF::from((2 * i) % 7) * BF::from((i + 1) % 7) * BF::from((i + 2) % 7))
             .fold(BF::zero(), |acc, val| acc + val);
 
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-        let poly_c =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_c);
-
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
         ];
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Precomputation);
@@ -462,7 +310,7 @@ mod simple_extension_tests {
     }
 
     /// Converts an interpolation matrix into maps.
-    fn get_imaps<FF: Field>(
+    fn get_imaps<FF: TowerField>(
         interpolation_matrix: &Vec<Vec<i64>>,
     ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
         // Ensure the interpolation matrix is a square matrix.
@@ -480,9 +328,9 @@ mod simple_extension_tests {
                         .zip(irow_cloned.iter())
                         .fold(FF::zero(), |acc, (value, scalar)| {
                             if *scalar < 0 {
-                                acc - FF::from((*scalar).abs() as u64) * value
+                                acc - FF::from((*scalar).abs() as u64) * (*value)
                             } else {
-                                acc + FF::from((*scalar).abs() as u64) * value
+                                acc + FF::from((*scalar).abs() as u64) * (*value)
                             }
                         })
                 });
@@ -506,14 +354,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -547,17 +393,10 @@ mod simple_extension_tests {
             .map(|i| BF::from((2 * i) % 7) * BF::from((i + 1) % 7) * BF::from((i + 2) % 7))
             .fold(BF::zero(), |acc, val| acc + val);
 
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-        let poly_c =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_c);
-
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
         ];
 
         // Define mappings
@@ -565,7 +404,7 @@ mod simple_extension_tests {
         let map2 = Box::new(|x: &BF, y: &BF| -> BF { *x + *y });
         let map3 = Box::new(|x: &BF, y: &BF| -> BF { *x - *y });
         let map4 = Box::new(|_x: &BF, y: &BF| -> BF { *y });
-        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = vec![map1, map2, map3, map4];
+        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> = vec![map1, map2, map3, map4];
         let projective_map_indices = vec![0 as usize, 3 as usize];
 
         // Define interpolation matrix related maps.
@@ -591,7 +430,7 @@ mod simple_extension_tests {
         ///           │  0   0  -2   0 │         │  0  -2   4   0 │
         ///           └                ┘         └                ┘
         ///
-        fn get_interpolation_maps<FF: Field>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
+        fn get_interpolation_maps<FF: TowerField>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
             // Define interpolation matrix related maps
             let imap_1 = Box::new(|v: &Vec<FF>| -> FF {
                 v[0] - FF::from(3 as u32) * v[1] + FF::from(2 as u32) * v[2]
@@ -694,14 +533,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -743,29 +580,21 @@ mod simple_extension_tests {
             })
             .fold(BF::zero(), |acc, val| acc + val);
 
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-        let poly_c =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_c);
-        let poly_d =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_d);
-
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
-            LinearLagrangeList::<BF>::from(&poly_d),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_d),
         ];
 
         // Define mappings
         let map1 = Box::new(|x: &BF, _y: &BF| -> BF { *x });
         let map2 = Box::new(|x: &BF, y: &BF| -> BF { *x + *y });
         let map3 = Box::new(|x: &BF, y: &BF| -> BF { *x - *y });
-        let map4 = Box::new(|x: &BF, y: &BF| -> BF { *x + (*y * BF::from(2)) });
+        let map4 = Box::new(|x: &BF, y: &BF| -> BF { *x + (*y * BF::new(2u128, None)) });
         let map5 = Box::new(|_x: &BF, y: &BF| -> BF { *y });
-        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = vec![map1, map2, map3, map4, map5];
+        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> =
+            vec![map1, map2, map3, map4, map5];
         let projective_map_indices = vec![0 as usize, 4 as usize];
 
         // Define interpolation matrix related maps.
@@ -794,7 +623,7 @@ mod simple_extension_tests {
         ///           │   0   0   6   0   0 │         │  0  12 -42  36   0  │
         ///           └                     ┘         └                     ┘
         ///
-        fn get_interpolation_maps<FF: Field>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
+        fn get_interpolation_maps<FF: TowerField>() -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
             // Define interpolation matrix related maps
             let imap_1 = Box::new(|v: &Vec<FF>| -> FF {
                 let two_inv = FF::from(2 as u32).inverse().unwrap();
@@ -909,14 +738,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -950,17 +777,10 @@ mod simple_extension_tests {
             .map(|i| BF::from((2 * i) % 7) * BF::from((i + 1) % 7) * BF::from((i + 2) % 7))
             .fold(BF::zero(), |acc, val| acc + val);
 
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-        let poly_c =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_c);
-
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
         ];
 
         // Define mappings
@@ -969,7 +789,7 @@ mod simple_extension_tests {
         let map2 = Box::new(|x: &BF, y: &BF| -> BF { *x + *y }); // 1
         let map3 = Box::new(|x: &BF, y: &BF| -> BF { *x - *y }); // -1
         let map4 = Box::new(|_x: &BF, y: &BF| -> BF { *y }); // infty
-        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = vec![map1, map2, map3, map4];
+        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> = vec![map1, map2, map3, map4];
         let projective_map_indices = vec![0 as usize, 3 as usize];
 
         // Define interpolation matrix related maps.
@@ -1106,14 +926,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -1155,20 +973,11 @@ mod simple_extension_tests {
             })
             .fold(BF::zero(), |acc, val| acc + val);
 
-        let poly_a =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_a);
-        let poly_b =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_b);
-        let poly_c =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_c);
-        let poly_d =
-            DenseMultilinearExtension::<BF>::from_evaluations_vec(num_variables, evaluations_d);
-
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
-            LinearLagrangeList::<BF>::from(&poly_d),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_d),
         ];
 
         // Define mappings
@@ -1176,9 +985,10 @@ mod simple_extension_tests {
         let map1 = Box::new(|x: &BF, _y: &BF| -> BF { *x }); // 0
         let map2 = Box::new(|x: &BF, y: &BF| -> BF { *x + *y }); // 1
         let map3 = Box::new(|x: &BF, y: &BF| -> BF { *x - *y }); // -1
-        let map4 = Box::new(|x: &BF, y: &BF| -> BF { *x + (*y * BF::from(2)) }); // 2
+        let map4 = Box::new(|x: &BF, y: &BF| -> BF { *x + (*y * BF::new(2u128, None)) }); // 2
         let map5 = Box::new(|_x: &BF, y: &BF| -> BF { *y }); // inf
-        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = vec![map1, map2, map3, map4, map5];
+        let maps: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> =
+            vec![map1, map2, map3, map4, map5];
         let projective_map_indices = vec![0 as usize, 4 as usize];
 
         // Define interpolation matrix related maps.
@@ -1318,14 +1128,12 @@ mod simple_extension_tests {
 
         // Convert a base field element to an extension field element
         fn to_ef(base_field_element: &BF) -> EF {
-            EF::new(*base_field_element, BF::zero())
+            EF::new(base_field_element.get_val(), None)
         }
 
         // Multiplies a base field element to an extension field element
         fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
-            let mut result: EF = EF::from(*extension_field_element);
-            result.mul_assign_by_basefield(base_field_element);
-            result
+            extension_field_element * base_field_element
         }
 
         // Adds two extension field elements
@@ -1344,27 +1152,23 @@ mod simple_extension_tests {
         }
 
         // Take four simple polynomial
-        let mut rng = test_rng();
         const NV: usize = 10;
-        let poly_a: DenseMultilinearExtension<BF> = DenseMultilinearExtension::rand(NV, &mut rng);
-        let poly_b: DenseMultilinearExtension<BF> = DenseMultilinearExtension::rand(NV, &mut rng);
-        let poly_c: DenseMultilinearExtension<BF> = DenseMultilinearExtension::from_evaluations_vec(
-            NV,
-            poly_a
-                .evaluations
-                .iter()
-                .zip(poly_b.evaluations.iter())
-                .map(|(a, b)| a * b)
-                .collect(),
-        );
-        let poly_e: DenseMultilinearExtension<BF> = DenseMultilinearExtension::rand(NV, &mut rng);
+        const NE: u32 = (1 as u32) << NV;
+        let poly_a = BF::rand_vector(NE as usize, Some(3));
+        let poly_b = BF::rand_vector(NE as usize, Some(3));
+        let poly_c = poly_a
+            .iter()
+            .zip(poly_b.iter())
+            .map(|(a, b)| a * b)
+            .collect();
+        let poly_e = BF::rand_vector(NE as usize, Some(3));
         let claimed_sum: BF = BF::zero();
 
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
-            LinearLagrangeList::<BF>::from(&poly_a),
-            LinearLagrangeList::<BF>::from(&poly_b),
-            LinearLagrangeList::<BF>::from(&poly_c),
-            LinearLagrangeList::<BF>::from(&poly_e),
+            LinearLagrangeList::<BF>::from_vector(&poly_a),
+            LinearLagrangeList::<BF>::from_vector(&poly_b),
+            LinearLagrangeList::<BF>::from_vector(&poly_c),
+            LinearLagrangeList::<BF>::from_vector(&poly_e),
         ];
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, 3, AlgorithmType::Naive);

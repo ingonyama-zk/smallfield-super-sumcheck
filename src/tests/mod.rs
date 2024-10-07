@@ -1,5 +1,5 @@
 mod btf_sumcheck;
-// mod simple_tests;
+mod simple_tests;
 
 pub mod test_helpers {
     use nalgebra::DMatrix;
