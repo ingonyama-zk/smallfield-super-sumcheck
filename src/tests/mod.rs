@@ -1,79 +1,39 @@
-mod baby_bear;
-mod bls12_381;
-mod bn254;
-pub mod fields;
-mod goldilocks;
+mod btf_sumcheck;
 // mod simple_tests;
 
 pub mod test_helpers {
-    use ark_ff::{Field, PrimeField};
-    use ark_poly::DenseMultilinearExtension;
     use nalgebra::DMatrix;
-    use rand::Rng;
 
     use crate::{
         data_structures::LinearLagrangeList,
         prover::{AlgorithmType, ProverState},
+        tower_fields::TowerField,
         IPForMLSumcheck,
     };
 
-    #[derive(PartialEq, Clone, Debug, Copy)]
-    pub enum WitnessType {
-        U1,
-        U8,
-        U32,
-        U64,
-    }
-
-    fn generate_random_i64_vec(witness_type: WitnessType, num_elements: usize) -> Vec<i64> {
-        let mut rng = rand::thread_rng();
-
-        match witness_type {
-            WitnessType::U1 => (0..num_elements)
-                .map(|_| rng.gen::<bool>() as i64)
-                .collect(),
-            WitnessType::U8 => (0..num_elements).map(|_| rng.gen::<u8>() as i64).collect(),
-            WitnessType::U32 => (0..num_elements).map(|_| rng.gen::<u32>() as i64).collect(),
-            WitnessType::U64 => (0..num_elements).map(|_| rng.gen::<u64>() as i64).collect(),
-        }
-    }
-
     /// Helper function to create sumcheck test multivariate polynomials of given degree.
-    pub fn create_sumcheck_test_data<EF: Field, BF: PrimeField>(
+    pub fn create_sumcheck_test_data<EF: TowerField, BF: TowerField>(
         nv: usize,
         degree: usize,
         algorithm: AlgorithmType,
-        witness_type: WitnessType,
     ) -> (ProverState<EF, BF>, BF) {
         let num_evaluations: usize = (1 as usize) << nv;
         let mut polynomials: Vec<LinearLagrangeList<BF>> = Vec::with_capacity(degree);
-        let mut polynomials_int: Vec<Vec<i64>> = Vec::with_capacity(degree);
-        let mut polynomial_hadamard: Vec<BF> = vec![BF::ONE; num_evaluations];
+        let mut polynomial_hadamard: Vec<BF> = vec![BF::one(); num_evaluations];
         for _ in 0..degree {
-            let poly_i_vec = generate_random_i64_vec(witness_type, num_evaluations);
-            let poly_i_vec_bf = poly_i_vec
-                .iter()
-                .map(|pi_j| BF::from(*pi_j as u64))
-                .collect();
-            let poly_i: DenseMultilinearExtension<BF> =
-                DenseMultilinearExtension::from_evaluations_vec(nv, poly_i_vec_bf);
-            polynomials.push(LinearLagrangeList::<BF>::from(&poly_i));
-            polynomials_int.push(poly_i_vec);
+            let poly_i_vec_bf = (0..num_evaluations).map(|_| BF::rand(Some(5))).collect();
+            polynomials.push(LinearLagrangeList::<BF>::from_vector(&poly_i_vec_bf));
             polynomial_hadamard
                 .iter_mut()
-                .zip(poly_i.iter())
+                .zip(poly_i_vec_bf.iter())
                 .for_each(|(p_acc, p_curr)| *p_acc *= *p_curr);
         }
         let claimed_sum: BF = polynomial_hadamard
             .iter()
-            .fold(BF::zero(), |acc, ph| acc + ph);
+            .fold(BF::zero(), |acc, ph| acc + ph.clone());
 
-        let prover_state: ProverState<EF, BF> = IPForMLSumcheck::<EF, BF>::prover_init(
-            &polynomials,
-            &polynomials_int,
-            degree,
-            algorithm,
-        );
+        let prover_state: ProverState<EF, BF> =
+            IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, degree, algorithm);
 
         (prover_state, claimed_sum)
     }
@@ -259,13 +219,13 @@ pub mod test_helpers {
     }
 
     /// Converts a matrix into maps.
-    pub fn get_maps_from_matrix<FF: Field>(
+    pub fn get_maps_from_matrix<FF: TowerField>(
         matrix: &Vec<Vec<i64>>,
         divisor: i64,
     ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
         assert!(divisor > 0);
         let divisor_ff = FF::from(divisor.abs() as u32);
-        let mut divisor_inv_ff = FF::ONE;
+        let mut divisor_inv_ff = FF::one();
         if divisor != 1 {
             divisor_inv_ff = divisor_ff.inverse().unwrap();
         }
@@ -277,15 +237,15 @@ pub mod test_helpers {
                     v.iter()
                         .zip(irow_cloned.iter())
                         .fold(FF::zero(), |acc, (value, scalar)| {
-                            let scalar_ff = FF::from((*scalar).abs() as u32);
+                            let scalar_ff = FF::new((*scalar).abs() as u128, Some(5));
                             let mut scalar_by_divisor = scalar_ff;
                             if divisor != 1 {
                                 scalar_by_divisor *= divisor_inv_ff;
                             }
                             if *scalar < 0 {
-                                acc - scalar_by_divisor * value
+                                acc - scalar_by_divisor * (*value)
                             } else {
-                                acc + scalar_by_divisor * value
+                                acc + scalar_by_divisor * (*value)
                             }
                         })
                 });
@@ -295,12 +255,11 @@ pub mod test_helpers {
     }
 
     /// Setup all mappings etc for the toom-cook algorithm.
-    pub fn common_setup_for_toom_cook<BF: Field, EF: Field>(
+    pub fn common_setup_for_toom_cook<BF: TowerField, EF: TowerField>(
         degree: usize,
         with_inversions: bool,
     ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
+        Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>,
         Vec<usize>,
         Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
         Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
@@ -309,7 +268,8 @@ pub mod test_helpers {
         // Define evaluation mappings
         // p(x) = p0 + p1.x
         let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
+        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> =
+            Vec::with_capacity(num_evals);
         emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
         emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
         for i in 1..=(num_evals / 2) {
@@ -320,22 +280,6 @@ pub mod test_helpers {
             if emaps_base.len() < num_evals {
                 let mapi = Box::new(move |x: &BF, y: &BF| -> BF { *x - (*y * BF::from(i as u32)) });
                 emaps_base.push(mapi);
-            }
-        }
-
-        // Define integer maps
-        let mut emaps_base_int: Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>> =
-            Vec::with_capacity(num_evals);
-        emaps_base_int.push(Box::new(move |x: &i64, _y: &i64| -> i64 { *x }));
-        emaps_base_int.push(Box::new(move |_x: &i64, y: &i64| -> i64 { *y }));
-        for i in 1..=(num_evals / 2) {
-            if emaps_base_int.len() < num_evals {
-                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x + (*y * (i as i64)) });
-                emaps_base_int.push(mapi);
-            }
-            if emaps_base_int.len() < num_evals {
-                let mapi = Box::new(move |x: &i64, y: &i64| -> i64 { *x - (*y * (i as i64)) });
-                emaps_base_int.push(mapi);
             }
         }
 
@@ -356,7 +300,6 @@ pub mod test_helpers {
 
         (
             emaps_base,
-            emaps_base_int,
             projective_map_indices,
             imaps_base,
             imaps_ext,

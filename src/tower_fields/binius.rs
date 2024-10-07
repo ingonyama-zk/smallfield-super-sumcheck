@@ -1,7 +1,10 @@
 use std::{
     fmt,
+    iter::{Product, Sum},
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub},
 };
+
+use rand::Rng;
 
 use super::TowerField;
 
@@ -10,7 +13,7 @@ use super::TowerField;
 /// Invserse of 0 should throw an error.
 const F2_4_INVERSE: [u128; 15] = [1, 3, 2, 6, 14, 4, 15, 13, 10, 9, 12, 11, 8, 5, 7];
 
-#[derive(Clone, Eq)]
+#[derive(Copy, Clone, Eq)]
 pub struct BiniusTowerField {
     val: u128,         // To store the value in the field
     num_levels: usize, // Number of levels in the binary tower
@@ -45,13 +48,32 @@ impl TowerField for BiniusTowerField {
     }
 
     // Zero function
-    fn zero(&mut self) {
-        self.val = 0;
+    fn zero() -> Self {
+        Self::new(0u128, Some(0))
+    }
+
+    fn is_zero(&self) -> bool {
+        *self == Self::zero()
     }
 
     // One function
-    fn one(&mut self) {
-        self.val = 1;
+    fn one() -> Self {
+        Self::new(1u128, Some(0))
+    }
+
+    // Generate a random BiniusTowerField with a random value
+    // TODO: add rng as a param.
+    fn rand(num_levels: Option<usize>) -> Self {
+        let mut rng = rand::thread_rng();
+        let random_val = rng.gen::<u128>(); // Generate a random u128 value
+        BiniusTowerField::new(random_val, num_levels) // Use the constructor with the random value
+    }
+
+    // Generate a vector of random BiniusTowerField elements
+    fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self> {
+        (0..size)
+            .map(|_| BiniusTowerField::rand(num_levels)) // Generate random elements
+            .collect() // Collect them into a vector
     }
 
     // Extend the number of levels in the tower
@@ -280,6 +302,55 @@ impl<'a> Mul<&'a BiniusTowerField> for &'a BiniusTowerField {
     }
 }
 
+// Implement the Product trait for BiniusTowerField
+impl Product for BiniusTowerField {
+    fn product<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(BiniusTowerField::one(), |acc, x| acc * x)
+    }
+}
+
+impl Sum for BiniusTowerField {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(BiniusTowerField::zero(), |acc, x| acc + x)
+    }
+}
+
+impl From<u128> for BiniusTowerField {
+    fn from(val: u128) -> Self {
+        BiniusTowerField::new(val, Some(7))
+    }
+}
+
+impl From<u64> for BiniusTowerField {
+    fn from(val: u64) -> Self {
+        BiniusTowerField::new(val as u128, Some(6))
+    }
+}
+
+impl From<u32> for BiniusTowerField {
+    fn from(val: u32) -> Self {
+        BiniusTowerField::new(val as u128, Some(5))
+    }
+}
+
+impl From<u16> for BiniusTowerField {
+    fn from(val: u16) -> Self {
+        BiniusTowerField::new(val as u128, Some(4))
+    }
+}
+
+impl From<u8> for BiniusTowerField {
+    fn from(val: u8) -> Self {
+        BiniusTowerField::new(val as u128, Some(3))
+    }
+}
+
 // To make BiniusTowerField printable
 impl fmt::Display for BiniusTowerField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -377,16 +448,16 @@ mod tests {
 
     #[test]
     fn test_zero() {
-        let mut field = BTF::new(10, Some(2));
-        field.zero();
+        let field = BTF::zero();
         assert_eq!(field.val, 0);
+        assert_eq!(field.num_levels, 0);
     }
 
     #[test]
     fn test_one() {
-        let mut field = BTF::new(10, Some(2));
-        field.one();
+        let field = BTF::one();
         assert_eq!(field.val, 1);
+        assert_eq!(field.num_levels, 0);
     }
 
     #[test]

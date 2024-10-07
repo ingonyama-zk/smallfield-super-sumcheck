@@ -1,13 +1,13 @@
-use ark_ff::{Field, PrimeField};
 use merlin::Transcript;
 
+use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::LinearLagrangeList;
-use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
+use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
 use rayon::prelude::*;
 
-impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Computes the round polynomial using the algorithm 1 (collapsing arrays) from the paper
     /// https://github.com/ingonyama-zk/papers/blob/main/sumcheck_201_chapter_1.pdf
     ///
@@ -22,7 +22,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     ) -> EF
     where
         C: Fn(&Vec<F>) -> EF + Sync,
-        F: Field,
+        F: TowerField,
     {
         let state_polynomial_len = state_polynomials[0].list.len();
 
@@ -57,14 +57,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
 
         // append the round polynomial (i.e. prover message) to the transcript
-        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
+        <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,
             b"r_poly",
             &round_polynomials[round_number - 1],
         );
 
         // generate challenge α_i = H( transcript );
-        let alpha: EF = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
+        let alpha: EF = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
             transcript,
             b"challenge_nextround",
         );

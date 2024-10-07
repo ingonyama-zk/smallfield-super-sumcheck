@@ -1,13 +1,12 @@
-use ark_ff::{Field, PrimeField};
-use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
 
+use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::MatrixPolynomial;
-use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
+use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
 
-impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Algorithm 2
     pub fn prove_with_witness_challenge_sep_agorithm<BC, BE, AEE, EE>(
         prover_state: &mut ProverState<EF, BF>,
@@ -69,9 +68,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // [ (1-α_1) ]
         // [ (α_1) ]
         //
-        let challenge_tuple =
-            DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
-        let mut challenge_matrix_polynomial = MatrixPolynomial::from_dense_mle(&challenge_tuple);
+        let mut challenge_matrix_polynomial =
+            MatrixPolynomial::from_evaluations_vec(&vec![EF::one() - alpha, alpha]);
 
         // Iterate for rounds 2, 3, ..., log(n).
         // For each round i s.t. i ≥ 2, we compute the evaluation of the round polynomial as:
@@ -92,7 +90,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         for round_number in 2..=prover_state.num_vars {
             for k in 0..(r_degree + 1) {
                 let poly_hadamard_product_len = matrix_polynomials[0].no_of_columns / 2;
-                let mut poly_hadamard_product: Vec<EF> = vec![EF::ONE; poly_hadamard_product_len];
+                let mut poly_hadamard_product: Vec<EF> = vec![EF::one(); poly_hadamard_product_len];
 
                 for matrix_poly in &matrix_polynomials {
                     let width = matrix_poly.no_of_columns;
@@ -111,7 +109,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                             .iter()
                             .zip(odd.iter())
                             .map(|(&e, &o)| {
-                                (BF::ONE - BF::from(k as u32)) * e + BF::from(k as u32) * o
+                                (BF::one() - BF::from(k as u32)) * e + BF::from(k as u32) * o
                             })
                             .collect();
 
@@ -148,14 +146,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
+            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_number - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -165,9 +163,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
             // Update challenge matrix with new challenge
             // ATTENTION: multiplication of extension field elements (ee)
-            let challenge_tuple =
-                DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
-            let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
+            let challenge_tuple_matrix =
+                MatrixPolynomial::from_evaluations_vec(&vec![EF::one() - alpha, alpha]);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 

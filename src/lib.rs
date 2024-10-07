@@ -1,3 +1,4 @@
+mod btf_transcript;
 pub mod data_structures;
 pub mod error;
 mod extension_transcript;
@@ -15,12 +16,12 @@ pub mod algorithms {
 
 pub mod tower_fields;
 
-use ark_ff::{Field, PrimeField};
 use ark_std::marker::PhantomData;
+use tower_fields::TowerField;
 
 /// Interactive Proof for Multilinear Sumcheck
 /// Same as arkworks ML sumcheck implementation
-pub struct IPForMLSumcheck<EF: Field, BF: PrimeField> {
+pub struct IPForMLSumcheck<EF: TowerField, BF: TowerField> {
     #[doc(hidden)]
     _marker: PhantomData<EF>,
     _other_marker: PhantomData<BF>,
