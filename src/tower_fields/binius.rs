@@ -4,6 +4,7 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub},
 };
 
+use num::{One, Zero};
 use rand::Rng;
 
 use super::TowerField;
@@ -45,20 +46,6 @@ impl TowerField for BiniusTowerField {
             num_levels: computed_levels,
             num_bits,
         }
-    }
-
-    // Zero function
-    fn zero() -> Self {
-        Self::new(0u128, Some(0))
-    }
-
-    fn is_zero(&self) -> bool {
-        *self == Self::zero()
-    }
-
-    // One function
-    fn one() -> Self {
-        Self::new(1u128, Some(0))
     }
 
     // Generate a random BiniusTowerField with a random value
@@ -157,6 +144,14 @@ impl TowerField for BiniusTowerField {
         Some(out_hi.join(&out_lo))
     }
 
+    fn pow(&self, exp: u32) -> Self {
+        let mut output = Self::one();
+        for _ in 0..exp {
+            output *= self.clone();
+        }
+        output
+    }
+
     fn mul_abstract(
         a_hi: &Self,
         a_lo: &Self,
@@ -181,6 +176,32 @@ impl TowerField for BiniusTowerField {
 
         // Concatenate hi and lo by shifting hi to make space for lo
         hi.join(&lo)
+    }
+}
+
+// Implementing the `Zero` trait for `BiniusTowerField`
+impl Zero for BiniusTowerField {
+    // Returns the "zero" value for BiniusTowerField
+    fn zero() -> Self {
+        Self::new(0u128, Some(0))
+    }
+
+    // Checks if the value is zero
+    fn is_zero(&self) -> bool {
+        *self == Self::zero()
+    }
+}
+
+// Implementing the `One` trait for `BiniusTowerField`
+impl One for BiniusTowerField {
+    // Returns the "zero" value for BiniusTowerField
+    fn one() -> Self {
+        Self::new(1u128, Some(0))
+    }
+
+    // Checks if the value is zero
+    fn is_one(&self) -> bool {
+        *self == Self::one()
     }
 }
 
@@ -238,6 +259,7 @@ impl Neg for BiniusTowerField {
 }
 
 impl MulAssign for BiniusTowerField {
+    // TODO: check why (a * b) * c ≠ a * (b * c) in some cases
     fn mul_assign(&mut self, other: BiniusTowerField) {
         let mut other_copy = other.clone();
 
@@ -384,6 +406,7 @@ impl PartialEq for BiniusTowerField {
 
 #[cfg(test)]
 mod tests {
+    use num::{One, Zero};
     use std::time::Instant;
 
     use rand::Rng;
@@ -582,6 +605,29 @@ mod tests {
     }
 
     #[test]
+    fn test_mul_commutative() {
+        for _ in 0..10000 {
+            let field1: BTF = BTF::rand(Some(3));
+            let field2: BTF = BTF::rand(Some(6));
+            let field3: BTF = BTF::rand(Some(4));
+
+            assert_eq!(field1 * field2 * field3, field2 * field1 * field3);
+        }
+    }
+
+    #[test]
+    fn test_add_commutative() {
+        for _ in 0..100000 {
+            let field1: BTF = BTF::rand(Some(3));
+            let field2: BTF = BTF::rand(Some(6));
+            let field3: BTF = BTF::rand(Some(4));
+
+            assert_eq!(field1 + field2 + field3, field2 + field1 + field3);
+            assert_eq!(field1 + field2 + field3, field3 + field2 + field1);
+        }
+    }
+
+    #[test]
     fn test_mul_assign() {
         let mut field1 = BTF::new(2, Some(1)); // binary 10
         let field2 = BTF::new(3, Some(1)); // binary 11
@@ -626,6 +672,17 @@ mod tests {
 
         assert!(field1.equals(&field2));
         assert!(!field1.equals(&field3));
+    }
+
+    #[test]
+    fn test_pow() {
+        let field1 = BTF::new(5, Some(3));
+
+        let mut multiplicand = BTF::one();
+        for i in 0..100 {
+            assert_eq!(field1.pow(i), multiplicand);
+            multiplicand *= field1;
+        }
     }
 
     #[test]

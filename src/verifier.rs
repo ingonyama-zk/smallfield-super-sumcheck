@@ -49,6 +49,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
             None => EF::one(),
         };
+        println!("mult_inv = {}", multiplicand_inv);
         let mut multiplicand_inv_pow_t = EF::one();
         let unwrapped_round_t = match round_t {
             Some(t) => {
@@ -63,6 +64,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         for _ in 0..unwrapped_round_t {
             multiplicand_inv_pow_t *= multiplicand_inv;
         }
+
+        println!("mult_inv_pow_t = {}", multiplicand_inv_pow_t);
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
@@ -126,6 +129,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 transcript,
                 b"challenge_nextround",
             );
+            println!("v_challenge = {:?}", alpha);
 
             // Compute r_{i}(α_i) using barycentric interpolation
             expected_sum = barycentric_interpolation(round_poly_evaluations, alpha);
@@ -145,7 +149,7 @@ fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
     // but with an optimization to multiply every element in the returned vector by
     // coeff
 
-    // First pass: compute [a, ab, abc, ...]
+    // First pass: compute [a, ab, abc, abcd]
     let mut prod = Vec::with_capacity(v.len());
     let mut tmp = F::one();
     for f in v.iter().filter(|f| !f.is_zero()) {
@@ -153,13 +157,23 @@ fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
         prod.push(tmp);
     }
 
-    // Invert `tmp`.
+    // Invert `tmp` ==> tmp = (1 / abcd)
     tmp = tmp.inverse().unwrap(); // Guaranteed to be nonzero.
 
     // Multiply product by coeff, so all inverses will be scaled by coeff
+    // tmp = q / abcd
     tmp *= coeff.clone();
 
     // Second pass: iterate backwards to compute inverses
+    // f: [d  c  a  b]
+    // s: [abc  ab  a  1]
+    // tmp: q / abcd
+    //
+    // 0:  abc * tmp = abc * (q / abcd) = q / d
+    // 1:  ab  * tmp = ab  * (q / abc)  = q / c
+    // 2:  a   * tmp = a   * (q / ab)   = q / b
+    // 3:  1   * tmp = 1   * (q / a)    = q / a
+    //
     for (f, s) in v
         .iter_mut()
         // Backwards
@@ -176,6 +190,20 @@ fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
     }
 }
 
+fn compute_barycentric_weight<F: TowerField>(i: usize, n: usize) -> F {
+    let mut weight = F::one();
+    let f_i = F::new(i as u128, None);
+    for j in 0..n {
+        if j == i {
+            continue;
+        } else {
+            let difference = f_i - F::new(j as u128, None);
+            weight *= difference;
+        }
+    }
+    weight
+}
+
 ///
 /// Evaluates an MLE polynomial at `x` given its evaluations on a set of integers.
 /// This works only for `num_points` ≤ 20 because we assume the integers are 64-bit numbers.
@@ -183,54 +211,129 @@ fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
 /// We can trivially extend this for `num_points` > 20 but in practical use cases, `num_points` would not exceed 8 or 10.
 /// Reference: Equation (3.3) from https://people.maths.ox.ac.uk/trefethen/barycentric.pdf
 ///
+/// We assume the integers are: I := {0, 1, 2, ..., n - 1}
+///
 pub(crate) fn barycentric_interpolation<F: TowerField>(evaluations: &[F], x: F) -> F {
+    // If the evaluation point x is in I, just return the corresponding evaluation.
     let num_points = evaluations.len();
-    let mut lagrange_coefficients: Vec<F> =
-        (0..num_points).map(|j| x - F::from(j as u64)).collect();
+    if x.get_val() < (num_points as u128) {
+        return evaluations[x.get_val() as usize];
+    }
+
+    // Calculate Lagrange coefficients: (x - 0), (x - 1), ..., (x - (n - 1))
+    let mut lagrange_coefficients: Vec<F> = (0..num_points)
+        .map(|j| x - F::new(j as u128, None))
+        .collect();
+
+    // Compute the product of all lagrange coefficients: (x - 0) * (x - 1) * ... * (x - (n - 1))
     let lagrange_evaluation = lagrange_coefficients
         .iter()
         .fold(F::one(), |mult, lc| mult * lc.clone());
 
     for i in 0..num_points {
-        let negative_factorial = u64_factorial(num_points - 1 - i);
-        let positive_factorial = u64_factorial(i);
+        // The i-th barycentric weight is: (i - 0) * (i - 1) * ... * (i - (n - 1))
+        // except the (i - i) term (ofcourse).
+        let barycentric_weight = compute_barycentric_weight::<F>(i, num_points);
 
-        let barycentric_weight = negative_factorial * positive_factorial;
-        if (num_points - 1 - i) % 2 == 1 {
-            lagrange_coefficients[i] *= -F::from(barycentric_weight);
-        } else {
-            lagrange_coefficients[i] *= F::from(barycentric_weight);
-        }
+        // Modify the coefficients with the barycentric weights
+        lagrange_coefficients[i] *= barycentric_weight;
     }
 
+    // Perform batch inversion and multiply by the coefficient
+    // Here, we assume you want to multiply by the identity (F::one())
     batch_inversion_and_multiply(&mut lagrange_coefficients, &F::one());
 
-    return lagrange_evaluation
-        * evaluations
-            .iter()
-            .zip(lagrange_coefficients.iter())
-            .fold(F::zero(), |acc, (&e, &lc)| acc + e * lc);
-}
+    // Evaluate the final polynomial at point x
+    let interpolation_result = evaluations
+        .iter()
+        .zip(lagrange_coefficients.iter())
+        .fold(F::zero(), |acc, (&e, &lc)| acc + (e * lc));
 
-/// compute the factorial(a) = 1 * 2 * ... * a
-#[inline]
-fn u64_factorial(a: usize) -> u64 {
-    let mut res = 1u64;
-    for i in 1..=a {
-        res *= i as u64;
-    }
-    res
+    return lagrange_evaluation * interpolation_result;
 }
 
 #[cfg(test)]
 mod test {
-    use super::u64_factorial;
+    use num::Zero;
+
+    use crate::tower_fields::binius::BiniusTowerField;
+    use crate::tower_fields::TowerField;
+    use crate::verifier::{barycentric_interpolation, batch_inversion_and_multiply};
+
+    type BF = BiniusTowerField;
+
+    fn evaluate<F: TowerField>(v: &[F], x: &F) -> F {
+        let mut result = F::zero();
+        let mut x_pow = F::one();
+
+        // Iterate through the coefficients from highest degree to lowest
+        for coeff in v.iter() {
+            // Add the current term (coeff * x^i) to the result
+            result += coeff.clone() * x_pow.clone();
+            x_pow *= x.clone();
+        }
+        result
+    }
 
     #[test]
-    fn test_u64_factorial() {
-        let input = 10 as usize;
-        let result = u64_factorial(input);
-        let result_prev = u64_factorial(input - 1);
-        assert_eq!((input as u64) * result_prev, result);
+    fn test_batch_inversion_and_multiply() {
+        // Define constants
+        const NV: usize = 16;
+        const NE: u32 = (1 as u32) << NV;
+
+        // Generate a random vector of elements in the binary field (BF)
+        let mut v = BF::rand_vector(NE as usize, Some(4));
+
+        // Create a random coefficient to multiply every element in the vector after inversion
+        let coeff = BF::rand(Some(2));
+
+        // Store the original vector for verification after batch inversion
+        let original_v = v.clone();
+
+        // Perform the batch inversion and multiplication
+        batch_inversion_and_multiply(&mut v, &coeff);
+
+        // Check that each non-zero element in the original vector was correctly inverted
+        for (i, elem) in original_v.iter().enumerate() {
+            // Ignore zero elements as they are not inverted
+            if !elem.is_zero() {
+                // The product of the original element and its batch inverse (multiplied by the coefficient)
+                // should be equal to the coefficient
+                let inverted_elem = &v[i];
+
+                // Check that elem * inverted_elem * coeff = coeff
+                let product = *elem * *inverted_elem;
+
+                // Since we're in a binary field, this product should equal coeff
+                assert_eq!(product, coeff, "Batch inversion failed at index {}", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_barycentric_interpolation_random() {
+        const NE: u32 = 100; // Number of elements
+
+        // Step 1: Sample a random coefficient vector
+        let coeffs: Vec<BF> = (0..NE).map(|_| BF::rand(Some(3))).collect();
+
+        // Step 2: Compute its evaluation on [0, 1, ..., N-1]
+        let points: Vec<BF> = (0..NE).map(|j| BF::new(j as u128, Some(3))).collect();
+        let values: Vec<BF> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
+
+        // Step 3: Choose a random point in a large range
+        let x_rand = BF::rand(Some(5));
+
+        // Step 4: Perform barycentric interpolation at the random point
+        let barycentric_eval = barycentric_interpolation(&values, x_rand);
+
+        // Step 5: Evaluate the original coefficient form at the random point
+        let original_eval = evaluate(&coeffs, &x_rand);
+
+        // Step 6: Assert that the barycentric evaluation matches the original evaluation
+        assert_eq!(
+            barycentric_eval, original_eval,
+            "Barycentric evaluation does not match original evaluation!"
+        );
     }
 }

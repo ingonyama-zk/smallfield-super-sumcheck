@@ -45,13 +45,15 @@ impl<EF: TowerField, BF: TowerField> TFTranscriptProtocol<EF, BF> for Transcript
     fn challenge_scalar(&mut self, label: &'static [u8]) -> EF {
         let mut buffer = vec![0u8; 16];
         self.challenge_bytes(label, &mut buffer);
+        // TODO: we must sample challenge from outside [0, 1, ..., n-1]
+        // TODO: maybe not?
         EF::new(
             u128::from_le_bytes(
                 buffer
                     .try_into()
                     .expect("Expects a vector of length 16 to compute challenge."),
             ),
-            Some(7),
+            Some(4),
         )
     }
 

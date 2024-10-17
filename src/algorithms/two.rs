@@ -35,6 +35,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             transcript,
         );
 
+        println!("alpha = {:?}", alpha);
+
         // Create and fill matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
         // Round 1:
@@ -57,6 +59,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             ));
         }
 
+        println!("matrix polynomials = {:#?}", matrix_polynomials);
+
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
         // [ (1-α_1)(1-α_2)...(α_m) ]
@@ -70,6 +74,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         //
         let mut challenge_matrix_polynomial =
             MatrixPolynomial::from_evaluations_vec(&vec![EF::one() - alpha, alpha]);
+
+        println!("chal = {:#?}", challenge_matrix_polynomial);
 
         // Iterate for rounds 2, 3, ..., log(n).
         // For each round i s.t. i ≥ 2, we compute the evaluation of the round polynomial as:
@@ -91,6 +97,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             for k in 0..(r_degree + 1) {
                 let poly_hadamard_product_len = matrix_polynomials[0].no_of_columns / 2;
                 let mut poly_hadamard_product: Vec<EF> = vec![EF::one(); poly_hadamard_product_len];
+                println!("k = {}", k);
 
                 for matrix_poly in &matrix_polynomials {
                     let width = matrix_poly.no_of_columns;
@@ -103,6 +110,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     let mut poly_evaluation_at_k: Vec<EF> = vec![EF::zero(); width / 2];
 
                     for row_idx in 0..height {
+                        println!(" row = {}", row_idx);
                         let (even, odd) = matrix_poly.evaluation_rows[row_idx].split_at(width / 2);
 
                         let row_evaluation_at_k: Vec<BF> = even
@@ -112,6 +120,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                                 (BF::one() - BF::from(k as u32)) * e + BF::from(k as u32) * o
                             })
                             .collect();
+
+                        println!("  row_evaluation_at_k = {:?}", row_evaluation_at_k);
 
                         // ATTENTION: multiplication of base field element with extension field element (be)
                         let row_evaluation_at_k_mult_by_challenge: Vec<EF> = row_evaluation_at_k
@@ -124,12 +134,19 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                             })
                             .collect();
 
+                        println!(
+                            "  row_evaluation_at_k_mult_by_challenge = {:?}",
+                            row_evaluation_at_k_mult_by_challenge
+                        );
+
                         // ATTENTION: addition of extension field elements
                         poly_evaluation_at_k
                             .iter_mut()
                             .zip(row_evaluation_at_k_mult_by_challenge.iter())
                             .for_each(|(p_acc, p_curr)| *p_acc = add_ee(p_acc, &p_curr));
                     }
+
+                    println!(" poly_evaluation_at_k = {:?}", poly_evaluation_at_k);
 
                     // ATTENTION: multiplication of extension field elements (ee)
                     // TODO: We can use the combine function to generalise this.
@@ -144,6 +161,12 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     .iter()
                     .fold(EF::zero(), |acc, val| add_ee(&acc, val));
             }
+
+            println!(
+                "r[{}] = {:#?}",
+                round_number,
+                round_polynomials[round_number - 1]
+            );
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(

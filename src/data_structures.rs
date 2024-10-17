@@ -881,6 +881,7 @@ mod test {
         tower_fields::{binius::BiniusTowerField, TowerField},
     };
     use itertools::izip;
+    use num::{One, Zero};
     use rand::Rng;
     use BiniusTowerField as F;
 

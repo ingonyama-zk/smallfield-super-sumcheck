@@ -4,6 +4,8 @@ use std::fmt::{Debug, Display};
 use std::iter::{Product, Sum};
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
 
+use num::{One, Zero};
+
 // Declare the `binius` module where the struct is defined.
 pub mod binius;
 
@@ -13,6 +15,8 @@ pub trait TowerField:
     + Copy
     + Clone
     + Debug
+    + Zero
+    + One
     + Add<Self, Output = Self>
     + Sub<Self, Output = Self>
     + Mul<Self, Output = Self>
@@ -37,9 +41,6 @@ pub trait TowerField:
     + PartialEq
 {
     fn new(val: u128, num_levels: Option<usize>) -> Self;
-    fn zero() -> Self;
-    fn is_zero(&self) -> bool;
-    fn one() -> Self;
     fn rand(num_levels: Option<usize>) -> Self;
     fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self>;
     fn extend_num_levels(&mut self, new_levels: usize);
@@ -58,4 +59,5 @@ pub trait TowerField:
         b_sum: &Self,
     ) -> Self;
     fn inverse(&self) -> Option<Self>;
+    fn pow(&self, exp: u32) -> Self;
 }
