@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod fq4_tests {
-    use std::time::Instant;
 
     use crate::error::SumcheckError;
     use crate::prover::AlgorithmType;
@@ -16,7 +15,6 @@ mod fq4_tests {
     use ark_std::vec::Vec;
     use merlin::Transcript;
     use num::One;
-    use rand::Rng;
     use rstest::rstest;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -171,40 +169,6 @@ mod fq4_tests {
                 .unwrap(),
             true
         );
-    }
-
-    #[test]
-    fn check_simple_mult() {
-        let mut input_1 = 68 as i16;
-        let multiplicand = 3 as i16;
-        let n = 10000;
-        let start = Instant::now();
-        for _ in 0..n {
-            input_1 = ((input_1 as i32) * (multiplicand as i32)) as i16;
-        }
-        let elapsed = start.elapsed();
-        println!("time: {:?}", elapsed);
-        println!("input = {}", input_1);
-        println!("time per mult = {:?}", elapsed / n);
-    }
-
-    #[test]
-    fn check_simple_mult_float() {
-        let mut rng = rand::thread_rng();
-        let num_elements = 100000;
-        let input_a: Vec<f64> = (0..num_elements).map(|_| rng.gen::<f64>()).collect();
-        let input_b: Vec<f64> = (0..num_elements).map(|_| rng.gen::<f64>()).collect();
-
-        let start = Instant::now();
-        let _ip_ab: Vec<f64> = input_a
-            .iter()
-            .zip(input_b.iter())
-            .map(|(a, b)| a * b)
-            .collect();
-        let elapsed = start.elapsed();
-        println!("time: {:?}", elapsed);
-        // println!("out = {}", ip_ab[10]);
-        println!("time per mult = {:?}", elapsed / num_elements);
     }
 
     #[rstest]
