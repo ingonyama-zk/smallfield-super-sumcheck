@@ -882,19 +882,12 @@ mod test {
     };
     use itertools::izip;
     use num::{One, Zero};
-    use rand::Rng;
     use BiniusTowerField as F;
 
     use super::{bit_decompose, MatrixPolynomial};
 
-    pub fn random_field_element<F: TowerField>() -> F {
-        let mut rng = rand::thread_rng();
-        let random_u128: u128 = rng.gen();
-        F::new(random_u128, None)
-    }
-
     pub fn get_random_linear_lagrange<F: TowerField>() -> LinearLagrange<F> {
-        LinearLagrange::new(&random_field_element(), &random_field_element())
+        LinearLagrange::new(&F::rand(Some(7)), &F::rand(Some(7)))
     }
 
     pub fn flatten(input: &mut MatrixPolynomial<F>) {
@@ -996,7 +989,7 @@ mod test {
         let lagrange_list: LinearLagrangeList<F> =
             LinearLagrangeList::new(&list_size, &linear_lagrange_vec);
 
-        let alpha: F = random_field_element();
+        let alpha = F::rand(Some(7));
         let folded_list = LinearLagrangeList::fold_list(&lagrange_list, alpha);
 
         for i in (0..lagrange_list.size).step_by(2) {
@@ -1017,7 +1010,7 @@ mod test {
             LinearLagrangeList::new(&list_size, &linear_lagrange_vec);
         let size_before = lagrange_list.size;
 
-        let alpha: F = random_field_element();
+        let alpha = F::rand(Some(7));
         lagrange_list.fold_in_half(alpha);
         let size_after = lagrange_list.size;
         assert_eq!(2 * size_after, size_before);
@@ -1036,9 +1029,14 @@ mod test {
     #[test]
     fn test_matrix_polynomial_heighten() {
         let poly = F::rand_vector(8, Some(6));
+        // Creates a (n x 1) matrix from a given vector of field elements
         let mut matrix_poly = MatrixPolynomial::from_evaluations_vec(&poly);
         let mid_point = poly.len() / 2;
         let end_point = poly.len();
+
+        // We first flatten it out as a (1 x n) vector, then fold over as (2 x (n/2)) matrix
+        flatten(&mut matrix_poly);
+        matrix_poly.heighten();
 
         assert_eq!(matrix_poly.no_of_rows, 2);
         assert_eq!(matrix_poly.no_of_columns, mid_point);
@@ -1073,14 +1071,20 @@ mod test {
     #[test]
     fn test_matrix_polynomial_tensor_hadamard() {
         let poly_a = F::rand_vector(8, Some(5));
-        let matrix_poly_a = MatrixPolynomial::from_evaluations_vec(&poly_a);
+        let mut matrix_poly_a = MatrixPolynomial::from_evaluations_vec(&poly_a);
         let poly_b = F::rand_vector(16, Some(5));
         let mut matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&poly_b);
         fn mult_bb(left: &F, right: &F) -> F {
             left * right
         }
 
+        // We first flatten it out as a (1 x n) vector, then fold over as (2 x (n/2)) matrix
+        flatten(&mut matrix_poly_a);
+        matrix_poly_a.heighten();
+
         // Reduce number of columns of b by half
+        flatten(&mut matrix_poly_b);
+        matrix_poly_b.heighten();
         matrix_poly_b.heighten();
 
         // Perform tensor-hadamard product of a and b
@@ -1128,15 +1132,18 @@ mod test {
             MatrixPolynomial::merkle_sums(&evaluations, num_children as usize, &vec![0, 1]);
 
         assert_eq!(merkle_sum_output.len(), depth as usize + 1);
-        assert_eq!(merkle_sum_output[0], vec![F::from(15u64)]);
+        // Binary addition ==> xor
+        // decimal: (2 + 4) + (3 + 6)
+        // binary: (110) + (101) = (011)
+        assert_eq!(merkle_sum_output[0], vec![F::from(3u64)]);
         assert_eq!(
             merkle_sum_output[1],
             vec![
-                F::from(6u64),
-                F::from(9u64),
-                F::from(12u64),
-                F::from(15u64),
-                F::from(18u64)
+                F::from(6u64),  // 2 + 4
+                F::from(5u64),  // 3 + 6
+                F::from(12u64), // 4 + 8
+                F::from(15u64), // 5 + 10
+                F::from(10u64)  // 6 + 12
             ]
         );
         assert_eq!(merkle_sum_output[2], evaluations);
@@ -1250,6 +1257,10 @@ mod test {
         let poly = F::rand_vector(16, Some(4));
         let mut matrix_poly = MatrixPolynomial::from_evaluations_vec(&poly);
 
+        // First flatten the matrix and heighten it to (2 x 8) matrix
+        flatten(&mut matrix_poly);
+        matrix_poly.heighten();
+
         // Reduce number of columns by half
         matrix_poly.heighten();
 
@@ -1304,15 +1315,17 @@ mod test {
             left * right
         }
 
+        // First flatten the matrix and heighten it to (2 x 16) matrix
+        flatten(&mut matrix_poly_a);
+        matrix_poly_a.heighten();
+
         // Heighten a
         matrix_poly_a.heighten(); // no of rows = 4
         matrix_poly_a.heighten(); // no of rows = 8
 
         // Create a challenge array with 4 rows, 1 column
         let poly_b = F::rand_vector(8, Some(4));
-        let mut matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&poly_b);
-        matrix_poly_b.heighten(); // no of rows = 4
-        matrix_poly_b.heighten(); // no of rows = 8
+        let matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&poly_b);
         assert_eq!(matrix_poly_b.no_of_columns, 1);
 
         // Test scale_by operation
@@ -1357,7 +1370,7 @@ mod test {
         let interpolation_maps: Vec<Box<dyn Fn(&Vec<F>) -> F>> =
             (0..col_size).map(|i| get_projective_imap(i)).collect();
 
-        let r: F = random_field_element();
+        let r = F::rand(Some(7));
         sample.update_with_challenge(r, &interpolation_maps, &mult_bb);
         assert_eq!(sample.no_of_rows, 1);
         assert_eq!(sample.no_of_columns, col_size);
