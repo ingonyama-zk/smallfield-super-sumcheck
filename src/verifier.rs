@@ -49,7 +49,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
             None => EF::one(),
         };
-        println!("mult_inv = {}", multiplicand_inv);
+
         let mut multiplicand_inv_pow_t = EF::one();
         let unwrapped_round_t = match round_t {
             Some(t) => {
@@ -64,8 +64,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         for _ in 0..unwrapped_round_t {
             multiplicand_inv_pow_t *= multiplicand_inv;
         }
-
-        println!("mult_inv_pow_t = {}", multiplicand_inv_pow_t);
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
@@ -129,7 +127,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 transcript,
                 b"challenge_nextround",
             );
-            println!("v_challenge = {:?}", alpha);
 
             // Compute r_{i}(α_i) using barycentric interpolation
             expected_sum = barycentric_interpolation(round_poly_evaluations, alpha);

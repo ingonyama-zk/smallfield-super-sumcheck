@@ -117,7 +117,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                             .iter()
                             .zip(odd.iter())
                             .map(|(&e, &o)| {
-                                (BF::one() - BF::from(k as u32)) * e + BF::from(k as u32) * o
+                                (BF::one() - BF::new(k as u128, None)) * e
+                                    + BF::new(k as u128, None) * o
                             })
                             .collect();
 

@@ -264,6 +264,8 @@ impl MulAssign for BiniusTowerField {
         let mut other_copy = other.clone();
 
         // Align num_levels to max
+        // TODO: can make mult more efficient by performing "partial" mult, i.e. a * b
+        // where a is "smaller" than b (in terms of num_levels).
         if self.num_levels > other_copy.num_levels {
             other_copy.extend_num_levels(self.num_levels);
         } else if other_copy.num_levels > self.num_levels {

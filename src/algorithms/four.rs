@@ -198,8 +198,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     evaluation_rows: Vec::with_capacity(1),
                 };
                 let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
+
+                // We make a minor assumption here. We assume that k is a 4-bit number, i.e. k ∈ {0, 1, ..., 15}
+                // since it's reasonable to assume num_evals would be always less than 16.
+                // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
+                // and we want these terms to be as "small" as possible.
                 scalar_matrix.update_with_challenge(
-                    BF::from(k),
+                    BF::new(k as u128, Some(2)),
                     &interpolation_maps_bf,
                     &mult_bb_local,
                 );

@@ -38,7 +38,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                         .map(|state_poly| {
                             let o = state_poly.list[i].odd;
                             let e = state_poly.list[i].even;
-                            (F::one() - F::from(k as u32)) * e + F::from(k as u32) * o
+                            let k_field = F::new(k as u128, None);
+                            (F::one() - k_field) * e + k_field * o
                         })
                         .collect();
 

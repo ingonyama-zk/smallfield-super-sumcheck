@@ -97,8 +97,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 // For d = 2: [(1 - k)²,  (1 - k)k,  k(1 - k), k²]
                 // For d = 3: [(1 - k)³,  (1 - k)²k,  (1 - k)k(1 - k),  (1 - k)k²,  k(1 - k)², k(1 - k)k, k²(1 - k), k³]
                 let scalar_tuple_matrix = MatrixPolynomial::from_evaluations_vec(&vec![
-                    BF::one() - BF::from(k),
-                    BF::from(k),
+                    BF::one() - BF::new(k as u128, Some(2)),
+                    BF::new(k as u128, Some(2)),
                 ]);
                 let mut scalar_matrix = scalar_tuple_matrix.clone();
                 for _ in 1..r_degree {
