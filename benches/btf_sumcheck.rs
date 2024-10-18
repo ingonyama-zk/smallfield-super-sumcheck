@@ -103,6 +103,7 @@ pub fn sumcheck_prove_bench(
     degree: usize,
     round_t: usize,
     algorithm: AlgorithmType,
+    num_levels: usize,
 ) {
     let mut group = c.benchmark_group("Prove");
     for nv in NUM_VARIABLES_RANGE {
@@ -118,7 +119,7 @@ pub fn sumcheck_prove_bench(
                         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
                             create_primitive_functions();
                         let (prover_state, _): (ProverState<EF, BF>, BF) =
-                            create_sumcheck_test_data(nv, degree, algorithm.clone());
+                            create_sumcheck_test_data(nv, degree, algorithm.clone(), num_levels);
                         let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, _) =
                             common_setup_for_toom_cook::<BF, EF>(degree);
 
@@ -168,37 +169,37 @@ pub fn sumcheck_prove_bench(
 }
 
 fn bench_baby_bear(c: &mut Criterion) {
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Naive);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::WitnessChallengeSeparation);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 1, 3, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Naive, 1);
+    sumcheck_prove_bench(c, 1, 3, AlgorithmType::WitnessChallengeSeparation, 1);
+    sumcheck_prove_bench(c, 1, 3, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 1, 3, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 1, 8, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 1, 8, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 1, 8, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 1, 8, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Naive);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::WitnessChallengeSeparation);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 2, 3, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Naive, 1);
+    sumcheck_prove_bench(c, 2, 3, AlgorithmType::WitnessChallengeSeparation, 1);
+    sumcheck_prove_bench(c, 2, 3, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 2, 3, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 2, 8, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 2, 8, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 2, 8, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 2, 8, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Naive);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::WitnessChallengeSeparation);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 3, 3, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Naive, 1);
+    sumcheck_prove_bench(c, 3, 3, AlgorithmType::WitnessChallengeSeparation, 1);
+    sumcheck_prove_bench(c, 3, 3, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 3, 3, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 3, 8, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 3, 8, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 3, 8, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 3, 8, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Naive);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::WitnessChallengeSeparation);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 4, 3, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Naive, 1);
+    sumcheck_prove_bench(c, 4, 3, AlgorithmType::WitnessChallengeSeparation, 1);
+    sumcheck_prove_bench(c, 4, 3, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 4, 3, AlgorithmType::ToomCook, 1);
 
-    sumcheck_prove_bench(c, 4, 8, AlgorithmType::Precomputation);
-    sumcheck_prove_bench(c, 4, 8, AlgorithmType::ToomCook);
+    sumcheck_prove_bench(c, 4, 8, AlgorithmType::Precomputation, 1);
+    sumcheck_prove_bench(c, 4, 8, AlgorithmType::ToomCook, 1);
 }
 
 criterion_group!(benches, bench_baby_bear);

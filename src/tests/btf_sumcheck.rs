@@ -97,11 +97,12 @@ mod fq4_tests {
         degree: usize,
         round_t: usize,
         algorithm: AlgorithmType,
+        num_levels: usize,
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
         let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone());
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), num_levels);
 
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             common_setup_for_toom_cook::<BF, EF>(degree);
@@ -147,17 +148,9 @@ mod fq4_tests {
 
     #[test]
     fn check_simple_sumcheck_product() {
-        // assert_eq!(
-        //     // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-        //     sumcheck_test_helper(8, 3, 5, AlgorithmType::Precomputation)
-        //         .1
-        //         .unwrap(),
-        //     true
-        // );
-
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(8, 3, 5, AlgorithmType::Naive)
+            sumcheck_test_helper(8, 3, 5, AlgorithmType::Precomputation, 1)
                 .1
                 .unwrap(),
             true
@@ -165,7 +158,15 @@ mod fq4_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(8, 3, 5, AlgorithmType::ToomCook)
+            sumcheck_test_helper(8, 3, 5, AlgorithmType::Naive, 1)
+                .1
+                .unwrap(),
+            true
+        );
+
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(8, 3, 5, AlgorithmType::ToomCook, 1)
                 .1
                 .unwrap(),
             true
@@ -220,7 +221,7 @@ mod fq4_tests {
     ) {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(nv, degree, 3, algorithm).1.unwrap(),
+            sumcheck_test_helper(nv, degree, 3, algorithm, 1).1.unwrap(),
             true
         );
     }
@@ -239,7 +240,7 @@ mod fq4_tests {
         algorithm: AlgorithmType,
     ) {
         assert_eq!(
-            sumcheck_test_helper(nv, degree, round_t, algorithm)
+            sumcheck_test_helper(nv, degree, round_t, algorithm, 1)
                 .1
                 .unwrap(),
             true
@@ -252,17 +253,19 @@ mod fq4_tests {
         #[values(1, 3, 4)] degree: usize,
         #[values(1, nv / 2)] round_t: usize,
     ) {
-        let (proof_1, result_1) = sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Naive);
+        let (proof_1, result_1) =
+            sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Naive, 1);
         let (proof_2, result_2) = sumcheck_test_helper(
             nv,
             degree,
             round_t,
             AlgorithmType::WitnessChallengeSeparation,
+            1,
         );
         let (proof_3, result_3) =
-            sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Precomputation);
+            sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Precomputation, 1);
         let (proof_4, result_4) =
-            sumcheck_test_helper(nv, degree, round_t, AlgorithmType::ToomCook);
+            sumcheck_test_helper(nv, degree, round_t, AlgorithmType::ToomCook, 1);
 
         assert_eq!(result_1.unwrap(), true);
         assert_eq!(result_2.unwrap(), true);

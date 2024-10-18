@@ -16,12 +16,15 @@ pub mod test_helpers {
         nv: usize,
         degree: usize,
         algorithm: AlgorithmType,
+        num_levels: usize,
     ) -> (ProverState<EF, BF>, BF) {
         let num_evaluations: usize = (1 as usize) << nv;
         let mut polynomials: Vec<LinearLagrangeList<BF>> = Vec::with_capacity(degree);
         let mut polynomial_hadamard: Vec<BF> = vec![BF::one(); num_evaluations];
         for _ in 0..degree {
-            let poly_i_vec_bf = (0..num_evaluations).map(|_| BF::rand(Some(5))).collect();
+            let poly_i_vec_bf = (0..num_evaluations)
+                .map(|_| BF::rand(Some(num_levels)))
+                .collect();
             polynomials.push(LinearLagrangeList::<BF>::from_vector(&poly_i_vec_bf));
             polynomial_hadamard
                 .iter_mut()
