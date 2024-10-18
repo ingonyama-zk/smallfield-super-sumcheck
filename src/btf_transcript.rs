@@ -53,7 +53,7 @@ impl<EF: TowerField, BF: TowerField> TFTranscriptProtocol<EF, BF> for Transcript
                     .try_into()
                     .expect("Expects a vector of length 16 to compute challenge."),
             ),
-            Some(4),
+            Some(7),
         )
     }
 

@@ -18,6 +18,7 @@ mod fq4_tests {
     use rstest::rstest;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
     // Define a global atomic counter
     static BB_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -107,6 +108,7 @@ mod fq4_tests {
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
+        let start = Instant::now();
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_ef,
@@ -123,6 +125,8 @@ mod fq4_tests {
             Some(&imaps_base),
             Some(&imaps_ext),
         );
+        let elapsed = start.elapsed();
+        println!("prove_{:?}: {:.2?}", algorithm, elapsed);
 
         println!("mult_bb was called {} times", get_bb_count());
 
@@ -148,7 +152,7 @@ mod fq4_tests {
     fn check_simple_sumcheck_product() {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(8, 3, 5, AlgorithmType::Precomputation, 1)
+            sumcheck_test_helper(14, 3, 3, AlgorithmType::Precomputation, 1)
                 .1
                 .unwrap(),
             true
@@ -156,7 +160,7 @@ mod fq4_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(8, 3, 5, AlgorithmType::Naive, 1)
+            sumcheck_test_helper(14, 3, 3, AlgorithmType::Naive, 1)
                 .1
                 .unwrap(),
             true
@@ -164,7 +168,7 @@ mod fq4_tests {
 
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(8, 3, 5, AlgorithmType::ToomCook, 1)
+            sumcheck_test_helper(14, 3, 3, AlgorithmType::ToomCook, 1)
                 .1
                 .unwrap(),
             true
