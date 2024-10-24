@@ -1,15 +1,14 @@
-use ark_ff::{Field, PrimeField};
-use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
 
+use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::{
-    bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt,
+    bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial,
 };
-use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
+use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
 
-impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Algorithm 3
     pub fn prove_with_precomputation_agorithm<BE, EE, BB, EC>(
         prover_state: &mut ProverState<EF, BF>,
@@ -41,16 +40,11 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // and so on.
         let r_degree = prover_state.max_multiplicands;
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
-        let mut matrix_polynomials_int: Vec<MatrixPolynomialInt<i64>> =
-            Vec::with_capacity(r_degree);
 
         for i in 0..r_degree {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));
-            matrix_polynomials_int.push(MatrixPolynomialInt::from_evaluations(
-                &prover_state.state_polynomials_int[i],
-            ))
         }
 
         // Pre-compute bb multiplications upto round t
@@ -59,24 +53,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
-
-            for matrix_int in &mut matrix_polynomials_int {
-                matrix_int.heighten();
-            }
         }
 
-        let precomputed_array_int =
-            MatrixPolynomialInt::tensor_inner_product(&matrix_polynomials_int);
-
-        assert_eq!(
-            precomputed_array_int.len(),
-            (1 as usize) << (round_t * r_degree)
-        );
-
-        let precomputed_array: Vec<BF> = precomputed_array_int
-            .iter()
-            .map(|p| BF::from(*p as u64))
-            .collect();
+        let precomputed_array =
+            MatrixPolynomial::tensor_inner_product(&matrix_polynomials, &mult_bb);
 
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
@@ -116,11 +96,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 // Compute scalar vector:
                 // For d = 2: [(1 - k)²,  (1 - k)k,  k(1 - k), k²]
                 // For d = 3: [(1 - k)³,  (1 - k)²k,  (1 - k)k(1 - k),  (1 - k)k²,  k(1 - k)², k(1 - k)k, k²(1 - k), k³]
-                let scalar_tuple = DenseMultilinearExtension::from_evaluations_vec(
-                    1,
-                    vec![BF::ONE - BF::from(k), BF::from(k)],
-                );
-                let scalar_tuple_matrix = MatrixPolynomial::from_dense_mle(&scalar_tuple);
+                let scalar_tuple_matrix = MatrixPolynomial::from_evaluations_vec(&vec![
+                    BF::one() - BF::new(k as u128, Some(2)),
+                    BF::new(k as u128, Some(2)),
+                ]);
                 let mut scalar_matrix = scalar_tuple_matrix.clone();
                 for _ in 1..r_degree {
                     scalar_matrix =
@@ -157,22 +136,21 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
+            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_num - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
 
             // Update challenge matrix with new challenge
-            let challenge_tuple =
-                DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
-            let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
+            let challenge_tuple_matrix =
+                MatrixPolynomial::from_evaluations_vec(&vec![EF::one() - alpha, alpha]);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
         }

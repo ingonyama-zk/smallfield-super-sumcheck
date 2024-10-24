@@ -29,22 +29,10 @@ flame = "0.2.2"
 [dev-dependencies]
 criterion = "0.5.1"
 
-# Run using `cargo bench --bench smallfield_sumcheck_bench`
+# Run using `cargo bench --bench btf_smallfield_sumcheck_bench`
 [[bench]]
-name = "smallfield_sumcheck_bench"
-path = "benches/bls12_381.rs"
-harness = false
-
-# Run using `cargo bench --bench smallfield_sumcheck_babybear_bench`
-[[bench]]
-name = "smallfield_sumcheck_babybear_bench"
-path = "benches/baby_bear.rs"
-harness = false
-
-# Run using `cargo bench --bench smallfield_sumcheck_bn254_bench`
-[[bench]]
-name = "smallfield_sumcheck_bn254_bench"
-path = "benches/bn254.rs"
+name = "btf_smallfield_sumcheck_bench"
+path = "benches/btf_sumcheck.rs"
 harness = false
 
 # Run using `cargo bench --bench btf_bench`

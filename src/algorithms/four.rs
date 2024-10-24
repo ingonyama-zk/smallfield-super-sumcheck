@@ -1,14 +1,13 @@
-use ark_ff::{Field, PrimeField};
-use ark_poly::DenseMultilinearExtension;
 use merlin::Transcript;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-use crate::data_structures::{LinearLagrangeList, MatrixPolynomial, MatrixPolynomialInt};
-use crate::extension_transcript::ExtensionTranscriptProtocol;
+use crate::btf_transcript::TFTranscriptProtocol;
+use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
 use crate::prover::ProverState;
+use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
 
-impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Algorithm 4
     pub fn prove_with_toom_cook_agorithm<BE, EE, BB, EC>(
         prover_state: &mut ProverState<EF, BF>,
@@ -18,8 +17,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_be: &BE,
         mult_ee: &EE,
         mult_bb: &BB,
-        mappings: &Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
-        mappings_int: &Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
+        mappings: &Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>,
         projection_mapping_indices: &Vec<usize>,
         interpolation_maps_bf: &Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
         interpolation_maps_ef: &Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
@@ -51,16 +49,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // and so on.
         let r_degree = prover_state.max_multiplicands;
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
-        let mut matrix_polynomials_int: Vec<MatrixPolynomialInt<i64>> =
-            Vec::with_capacity(r_degree);
 
         for i in 0..r_degree {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
-            ));
-
-            matrix_polynomials_int.push(MatrixPolynomialInt::from_evaluations(
-                &prover_state.state_polynomials_int[i],
             ));
         }
 
@@ -114,29 +106,21 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
-
-            for matrix_int in &mut matrix_polynomials_int {
-                matrix_int.heighten();
-            }
         }
 
         let num_evals = r_degree + 1;
         let num_product_terms = num_evals.pow(round_t as u32);
 
         // Parallelize over `j`
-        let precomputed_array_int: Vec<i64> = (0..num_product_terms)
+        let precomputed_array: Vec<BF> = (0..num_product_terms)
             .into_par_iter()
             .map(|j| {
                 // Parallelize matrices_terms_x computation for each `j`
-                let matrices_terms_x: Vec<Vec<i64>> = (0..matrix_polynomials.len())
+                let matrices_terms_x: Vec<Vec<BF>> = (0..matrix_polynomials.len())
                     .into_par_iter() // Parallelize over matrix_polynomials
                     .map(|i| {
-                        MatrixPolynomialInt::compute_merkle_roots(
-                            &matrix_polynomials_int[i],
-                            j,
-                            mappings_int,
-                        )
-                        .evaluation_rows[0]
+                        MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings)
+                            .evaluation_rows[0]
                             .to_vec()
                     })
                     .collect();
@@ -145,26 +129,19 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 let num_columns = matrices_terms_x[0].len();
 
                 // Squash each column by multiplying elements across rows in parallel
-                let sum_over_x: i64 = (0..num_columns)
+                let sum_over_x: BF = (0..num_columns)
                     .into_par_iter()
                     .map(|i| {
-                        // Multiply all elements in the current column `i`
-                        matrices_terms_x.iter().map(|row| row[i]).product::<i64>()
+                        matrices_terms_x
+                            .iter()
+                            .map(|row| row[i])
+                            .fold(BF::one(), |acc, val| mult_bb(&acc, &val))
                     })
                     .sum();
 
                 sum_over_x // Return the sum for this `j`
             })
             .collect(); // Collect the result of each `j` into the vector
-
-        let precomputed_array: Vec<BF> = precomputed_array_int
-            .iter()
-            .map(|&p| {
-                let p_positive = BF::from(p.abs() as u64);
-                let adjusted_value = if p < 0 { -p_positive } else { p_positive };
-                adjusted_value
-            })
-            .collect();
 
         // Accumulate pre-computed values to be used in rounds.
         let precomputed_arrays_for_rounds = MatrixPolynomial::<BF>::merkle_sums(
@@ -221,8 +198,13 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     evaluation_rows: Vec::with_capacity(1),
                 };
                 let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
+
+                // We make a minor assumption here. We assume that k is a 4-bit number, i.e. k ∈ {0, 1, ..., 15}
+                // since it's reasonable to assume num_evals would be always less than 16.
+                // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
+                // and we want these terms to be as "small" as possible.
                 scalar_matrix.update_with_challenge(
-                    BF::from(k),
+                    BF::new(k as u128, Some(2)),
                     &interpolation_maps_bf,
                     &mult_bb_local,
                 );
@@ -259,14 +241,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
+            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &round_polynomials[round_num - 1],
             );
 
             // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -291,9 +273,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
             // Update challenge matrix with new challenge
             // TODO: See if we can get rid of the second challenge matrix.
-            let challenge_tuple =
-                DenseMultilinearExtension::from_evaluations_vec(1, vec![EF::ONE - alpha, alpha]);
-            let challenge_tuple_matrix = MatrixPolynomial::from_dense_mle(&challenge_tuple);
+            let challenge_tuple_matrix =
+                MatrixPolynomial::from_evaluations_vec(&vec![EF::one() - alpha, alpha]);
             challenge_matrix_polynomial = challenge_matrix_polynomial
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
         }

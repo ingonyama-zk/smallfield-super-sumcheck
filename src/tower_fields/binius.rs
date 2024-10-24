@@ -1,7 +1,11 @@
 use std::{
     fmt,
+    iter::{Product, Sum},
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub},
 };
+
+use num::{One, Zero};
+use rand::Rng;
 
 use super::TowerField;
 
@@ -10,7 +14,7 @@ use super::TowerField;
 /// Invserse of 0 should throw an error.
 const F2_4_INVERSE: [u128; 15] = [1, 3, 2, 6, 14, 4, 15, 13, 10, 9, 12, 11, 8, 5, 7];
 
-#[derive(Clone, Eq)]
+#[derive(Copy, Clone, Eq)]
 pub struct BiniusTowerField {
     val: u128,         // To store the value in the field
     num_levels: usize, // Number of levels in the binary tower
@@ -44,14 +48,19 @@ impl TowerField for BiniusTowerField {
         }
     }
 
-    // Zero function
-    fn zero(&mut self) {
-        self.val = 0;
+    // Generate a random BiniusTowerField with a random value
+    // TODO: add rng as a param.
+    fn rand(num_levels: Option<usize>) -> Self {
+        let mut rng = rand::thread_rng();
+        let random_val = rng.gen::<u128>(); // Generate a random u128 value
+        BiniusTowerField::new(random_val, num_levels) // Use the constructor with the random value
     }
 
-    // One function
-    fn one(&mut self) {
-        self.val = 1;
+    // Generate a vector of random BiniusTowerField elements
+    fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self> {
+        (0..size)
+            .map(|_| BiniusTowerField::rand(num_levels)) // Generate random elements
+            .collect() // Collect them into a vector
     }
 
     // Extend the number of levels in the tower
@@ -135,6 +144,14 @@ impl TowerField for BiniusTowerField {
         Some(out_hi.join(&out_lo))
     }
 
+    fn pow(&self, exp: u32) -> Self {
+        let mut output = Self::one();
+        for _ in 0..exp {
+            output *= self.clone();
+        }
+        output
+    }
+
     fn mul_abstract(
         a_hi: &Self,
         a_lo: &Self,
@@ -159,6 +176,32 @@ impl TowerField for BiniusTowerField {
 
         // Concatenate hi and lo by shifting hi to make space for lo
         hi.join(&lo)
+    }
+}
+
+// Implementing the `Zero` trait for `BiniusTowerField`
+impl Zero for BiniusTowerField {
+    // Returns the "zero" value for BiniusTowerField
+    fn zero() -> Self {
+        Self::new(0u128, Some(0))
+    }
+
+    // Checks if the value is zero
+    fn is_zero(&self) -> bool {
+        *self == Self::zero()
+    }
+}
+
+// Implementing the `One` trait for `BiniusTowerField`
+impl One for BiniusTowerField {
+    // Returns the "zero" value for BiniusTowerField
+    fn one() -> Self {
+        Self::new(1u128, Some(0))
+    }
+
+    // Checks if the value is zero
+    fn is_one(&self) -> bool {
+        *self == Self::one()
     }
 }
 
@@ -216,10 +259,13 @@ impl Neg for BiniusTowerField {
 }
 
 impl MulAssign for BiniusTowerField {
+    // TODO: check why (a * b) * c ≠ a * (b * c) in some cases
     fn mul_assign(&mut self, other: BiniusTowerField) {
         let mut other_copy = other.clone();
 
         // Align num_levels to max
+        // TODO: can make mult more efficient by performing "partial" mult, i.e. a * b
+        // where a is "smaller" than b (in terms of num_levels).
         if self.num_levels > other_copy.num_levels {
             other_copy.extend_num_levels(self.num_levels);
         } else if other_copy.num_levels > self.num_levels {
@@ -280,6 +326,55 @@ impl<'a> Mul<&'a BiniusTowerField> for &'a BiniusTowerField {
     }
 }
 
+// Implement the Product trait for BiniusTowerField
+impl Product for BiniusTowerField {
+    fn product<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(BiniusTowerField::one(), |acc, x| acc * x)
+    }
+}
+
+impl Sum for BiniusTowerField {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(BiniusTowerField::zero(), |acc, x| acc + x)
+    }
+}
+
+impl From<u128> for BiniusTowerField {
+    fn from(val: u128) -> Self {
+        BiniusTowerField::new(val, Some(7))
+    }
+}
+
+impl From<u64> for BiniusTowerField {
+    fn from(val: u64) -> Self {
+        BiniusTowerField::new(val as u128, Some(6))
+    }
+}
+
+impl From<u32> for BiniusTowerField {
+    fn from(val: u32) -> Self {
+        BiniusTowerField::new(val as u128, Some(5))
+    }
+}
+
+impl From<u16> for BiniusTowerField {
+    fn from(val: u16) -> Self {
+        BiniusTowerField::new(val as u128, Some(4))
+    }
+}
+
+impl From<u8> for BiniusTowerField {
+    fn from(val: u8) -> Self {
+        BiniusTowerField::new(val as u128, Some(3))
+    }
+}
+
 // To make BiniusTowerField printable
 impl fmt::Display for BiniusTowerField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -313,6 +408,7 @@ impl PartialEq for BiniusTowerField {
 
 #[cfg(test)]
 mod tests {
+    use num::{One, Zero};
     use std::time::Instant;
 
     use rand::Rng;
@@ -377,16 +473,16 @@ mod tests {
 
     #[test]
     fn test_zero() {
-        let mut field = BTF::new(10, Some(2));
-        field.zero();
+        let field = BTF::zero();
         assert_eq!(field.val, 0);
+        assert_eq!(field.num_levels, 0);
     }
 
     #[test]
     fn test_one() {
-        let mut field = BTF::new(10, Some(2));
-        field.one();
+        let field = BTF::one();
         assert_eq!(field.val, 1);
+        assert_eq!(field.num_levels, 0);
     }
 
     #[test]
@@ -511,6 +607,29 @@ mod tests {
     }
 
     #[test]
+    fn test_mul_commutative() {
+        for _ in 0..10000 {
+            let field1: BTF = BTF::rand(Some(3));
+            let field2: BTF = BTF::rand(Some(6));
+            let field3: BTF = BTF::rand(Some(4));
+
+            assert_eq!(field1 * field2 * field3, field2 * field1 * field3);
+        }
+    }
+
+    #[test]
+    fn test_add_commutative() {
+        for _ in 0..100000 {
+            let field1: BTF = BTF::rand(Some(3));
+            let field2: BTF = BTF::rand(Some(6));
+            let field3: BTF = BTF::rand(Some(4));
+
+            assert_eq!(field1 + field2 + field3, field2 + field1 + field3);
+            assert_eq!(field1 + field2 + field3, field3 + field2 + field1);
+        }
+    }
+
+    #[test]
     fn test_mul_assign() {
         let mut field1 = BTF::new(2, Some(1)); // binary 10
         let field2 = BTF::new(3, Some(1)); // binary 11
@@ -555,6 +674,17 @@ mod tests {
 
         assert!(field1.equals(&field2));
         assert!(!field1.equals(&field3));
+    }
+
+    #[test]
+    fn test_pow() {
+        let field1 = BTF::new(5, Some(3));
+
+        let mut multiplicand = BTF::one();
+        for i in 0..100 {
+            assert_eq!(field1.pow(i), multiplicand);
+            multiplicand *= field1;
+        }
     }
 
     #[test]

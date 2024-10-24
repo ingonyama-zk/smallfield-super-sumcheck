@@ -1,14 +1,14 @@
-use ark_ff::{batch_inversion_and_mul, Field, PrimeField};
 use merlin::Transcript;
 
 use crate::{
+    btf_transcript::TFTranscriptProtocol,
     error::SumcheckError,
-    extension_transcript::ExtensionTranscriptProtocol,
     prover::{AlgorithmType, SumcheckProof},
+    tower_fields::TowerField,
     IPForMLSumcheck,
 };
 
-impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
+impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     ///
     /// Verify a sumcheck proof by checking for correctness of each round polynomial.
     /// Additionally, checks the evaluation of the original MLE polynomial (via oracle access)
@@ -33,7 +33,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         }
 
         // Initiate the transcript with the protocol name
-        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
+        <Transcript as TFTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             proof.num_vars as u64,
             proof.degree as u64,
@@ -44,12 +44,13 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 if algorithm == AlgorithmType::ToomCook {
                     m.inverse().unwrap()
                 } else {
-                    EF::ONE
+                    EF::one()
                 }
             }
-            None => EF::ONE,
+            None => EF::one(),
         };
-        let mut multiplicand_inv_pow_t = EF::ONE;
+
+        let mut multiplicand_inv_pow_t = EF::one();
         let unwrapped_round_t = match round_t {
             Some(t) => {
                 if algorithm == AlgorithmType::ToomCook {
@@ -115,14 +116,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             }
 
             // append the prover's message to the transcript
-            <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
+            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
                 &proof.round_polynomials[round_index],
             );
 
             // derive the verifier's challenge for the next round
-            let alpha = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
@@ -134,6 +135,72 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     }
 }
 
+/// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
+/// This method is explicitly single-threaded.
+/// Based on arkwork's function (but modified for binary tower fields):
+/// https://github.com/arkworks-rs/algebra/blob/b33df5cce2d54cf4c9248e4b229c7d6708fa9375/ff/src/fields/mod.rs#L381
+fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
+    // Montgomery’s Trick and Fast Implementation of Masked AES
+    // Genelle, Prouff and Quisquater
+    // Section 3.2
+    // but with an optimization to multiply every element in the returned vector by
+    // coeff
+
+    // First pass: compute [a, ab, abc, abcd]
+    let mut prod = Vec::with_capacity(v.len());
+    let mut tmp = F::one();
+    for f in v.iter().filter(|f| !f.is_zero()) {
+        tmp.mul_assign(f.clone());
+        prod.push(tmp);
+    }
+
+    // Invert `tmp` ==> tmp = (1 / abcd)
+    tmp = tmp.inverse().unwrap(); // Guaranteed to be nonzero.
+
+    // Multiply product by coeff, so all inverses will be scaled by coeff
+    // tmp = q / abcd
+    tmp *= coeff.clone();
+
+    // Second pass: iterate backwards to compute inverses
+    // f: [d  c  a  b]
+    // s: [abc  ab  a  1]
+    // tmp: q / abcd
+    //
+    // 0:  abc * tmp = abc * (q / abcd) = q / d
+    // 1:  ab  * tmp = ab  * (q / abc)  = q / c
+    // 2:  a   * tmp = a   * (q / ab)   = q / b
+    // 3:  1   * tmp = 1   * (q / a)    = q / a
+    //
+    for (f, s) in v
+        .iter_mut()
+        // Backwards
+        .rev()
+        // Ignore normalized elements
+        .filter(|f| !f.is_zero())
+        // Backwards, skip last element, fill in one for last term.
+        .zip(prod.into_iter().rev().skip(1).chain(Some(F::one())))
+    {
+        // tmp := tmp * f; f := tmp * s = 1/f
+        let new_tmp = tmp * *f;
+        *f = tmp * s;
+        tmp = new_tmp;
+    }
+}
+
+fn compute_barycentric_weight<F: TowerField>(i: usize, n: usize) -> F {
+    let mut weight = F::one();
+    let f_i = F::new(i as u128, None);
+    for j in 0..n {
+        if j == i {
+            continue;
+        } else {
+            let difference = f_i - F::new(j as u128, None);
+            weight *= difference;
+        }
+    }
+    weight
+}
+
 ///
 /// Evaluates an MLE polynomial at `x` given its evaluations on a set of integers.
 /// This works only for `num_points` ≤ 20 because we assume the integers are 64-bit numbers.
@@ -141,79 +208,129 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 /// We can trivially extend this for `num_points` > 20 but in practical use cases, `num_points` would not exceed 8 or 10.
 /// Reference: Equation (3.3) from https://people.maths.ox.ac.uk/trefethen/barycentric.pdf
 ///
-pub(crate) fn barycentric_interpolation<F: Field>(evaluations: &[F], x: F) -> F {
+/// We assume the integers are: I := {0, 1, 2, ..., n - 1}
+///
+pub(crate) fn barycentric_interpolation<F: TowerField>(evaluations: &[F], x: F) -> F {
+    // If the evaluation point x is in I, just return the corresponding evaluation.
     let num_points = evaluations.len();
-    let mut lagrange_coefficients: Vec<F> =
-        (0..num_points).map(|j| x - F::from(j as u64)).collect();
+    if x.get_val() < (num_points as u128) {
+        return evaluations[x.get_val() as usize];
+    }
+
+    // Calculate Lagrange coefficients: (x - 0), (x - 1), ..., (x - (n - 1))
+    let mut lagrange_coefficients: Vec<F> = (0..num_points)
+        .map(|j| x - F::new(j as u128, None))
+        .collect();
+
+    // Compute the product of all lagrange coefficients: (x - 0) * (x - 1) * ... * (x - (n - 1))
     let lagrange_evaluation = lagrange_coefficients
         .iter()
-        .fold(F::one(), |mult, lc| mult * lc);
+        .fold(F::one(), |mult, lc| mult * lc.clone());
 
     for i in 0..num_points {
-        let negative_factorial = u64_factorial(num_points - 1 - i);
-        let positive_factorial = u64_factorial(i);
+        // The i-th barycentric weight is: (i - 0) * (i - 1) * ... * (i - (n - 1))
+        // except the (i - i) term (ofcourse).
+        let barycentric_weight = compute_barycentric_weight::<F>(i, num_points);
 
-        let barycentric_weight = negative_factorial * positive_factorial;
-        if (num_points - 1 - i) % 2 == 1 {
-            lagrange_coefficients[i] *= -F::from(barycentric_weight);
-        } else {
-            lagrange_coefficients[i] *= F::from(barycentric_weight);
-        }
+        // Modify the coefficients with the barycentric weights
+        lagrange_coefficients[i] *= barycentric_weight;
     }
 
-    batch_inversion_and_mul(&mut lagrange_coefficients, &F::one());
+    // Perform batch inversion and multiply by the coefficient
+    // Here, we assume you want to multiply by the identity (F::one())
+    batch_inversion_and_multiply(&mut lagrange_coefficients, &F::one());
 
-    return lagrange_evaluation
-        * evaluations
-            .iter()
-            .zip(lagrange_coefficients.iter())
-            .fold(F::zero(), |acc, (&e, &lc)| acc + e * lc);
-}
+    // Evaluate the final polynomial at point x
+    let interpolation_result = evaluations
+        .iter()
+        .zip(lagrange_coefficients.iter())
+        .fold(F::zero(), |acc, (&e, &lc)| acc + (e * lc));
 
-/// compute the factorial(a) = 1 * 2 * ... * a
-#[inline]
-fn u64_factorial(a: usize) -> u64 {
-    let mut res = 1u64;
-    for i in 1..=a {
-        res *= i as u64;
-    }
-    res
+    return lagrange_evaluation * interpolation_result;
 }
 
 #[cfg(test)]
 mod test {
-    use super::u64_factorial;
-    use crate::verifier::barycentric_interpolation;
-    use ark_poly::univariate::DensePolynomial;
-    use ark_poly::DenseUVPolynomial;
-    use ark_poly::Polynomial;
-    use ark_std::vec::Vec;
-    use ark_std::UniformRand;
+    use num::Zero;
 
-    type F = ark_bls12_381::Fr;
+    use crate::tower_fields::binius::BiniusTowerField;
+    use crate::tower_fields::TowerField;
+    use crate::verifier::{barycentric_interpolation, batch_inversion_and_multiply};
 
-    #[test]
-    fn test_u64_factorial() {
-        let input = 10 as usize;
-        let result = u64_factorial(input);
-        let result_prev = u64_factorial(input - 1);
-        assert_eq!((input as u64) * result_prev, result);
+    type BF = BiniusTowerField;
+
+    fn evaluate<F: TowerField>(v: &[F], x: &F) -> F {
+        let mut result = F::zero();
+        let mut x_pow = F::one();
+
+        // Iterate through the coefficients from highest degree to lowest
+        for coeff in v.iter() {
+            // Add the current term (coeff * x^i) to the result
+            result += coeff.clone() * x_pow.clone();
+            x_pow *= x.clone();
+        }
+        result
     }
 
     #[test]
-    fn test_interpolation() {
-        let mut prng = ark_std::test_rng();
+    fn test_batch_inversion_and_multiply() {
+        // Define constants
+        const NV: usize = 16;
+        const NE: u32 = (1 as u32) << NV;
 
-        // test a polynomial with 20 known points, i.e., with degree 19
-        let poly = DensePolynomial::<F>::rand(20 - 1, &mut prng);
-        let evals = (0..20)
-            .map(|i| poly.evaluate(&F::from(i)))
-            .collect::<Vec<F>>();
-        let query = F::rand(&mut prng);
+        // Generate a random vector of elements in the binary field (BF)
+        let mut v = BF::rand_vector(NE as usize, Some(4));
 
+        // Create a random coefficient to multiply every element in the vector after inversion
+        let coeff = BF::rand(Some(2));
+
+        // Store the original vector for verification after batch inversion
+        let original_v = v.clone();
+
+        // Perform the batch inversion and multiplication
+        batch_inversion_and_multiply(&mut v, &coeff);
+
+        // Check that each non-zero element in the original vector was correctly inverted
+        for (i, elem) in original_v.iter().enumerate() {
+            // Ignore zero elements as they are not inverted
+            if !elem.is_zero() {
+                // The product of the original element and its batch inverse (multiplied by the coefficient)
+                // should be equal to the coefficient
+                let inverted_elem = &v[i];
+
+                // Check that elem * inverted_elem * coeff = coeff
+                let product = *elem * *inverted_elem;
+
+                // Since we're in a binary field, this product should equal coeff
+                assert_eq!(product, coeff, "Batch inversion failed at index {}", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_barycentric_interpolation_random() {
+        const NE: u32 = 100; // Number of elements
+
+        // Step 1: Sample a random coefficient vector
+        let coeffs: Vec<BF> = (0..NE).map(|_| BF::rand(Some(3))).collect();
+
+        // Step 2: Compute its evaluation on [0, 1, ..., N-1]
+        let points: Vec<BF> = (0..NE).map(|j| BF::new(j as u128, Some(3))).collect();
+        let values: Vec<BF> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
+
+        // Step 3: Choose a random point in a large range
+        let x_rand = BF::rand(Some(5));
+
+        // Step 4: Perform barycentric interpolation at the random point
+        let barycentric_eval = barycentric_interpolation(&values, x_rand);
+
+        // Step 5: Evaluate the original coefficient form at the random point
+        let original_eval = evaluate(&coeffs, &x_rand);
+
+        // Step 6: Assert that the barycentric evaluation matches the original evaluation
         assert_eq!(
-            poly.evaluate(&query),
-            barycentric_interpolation(&evals, query)
+            barycentric_eval, original_eval,
+            "Barycentric evaluation does not match original evaluation!"
         );
     }
 }
