@@ -106,6 +106,11 @@ mod fq4_tests {
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             common_setup_for_toom_cook::<BF, EF>(degree);
 
+        println!(
+            "n = {}, d = {}, t = {}, algo = {:?}",
+            nv, degree, round_t, algorithm
+        );
+
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
         let start = Instant::now();
@@ -126,9 +131,9 @@ mod fq4_tests {
             Some(&imaps_ext),
         );
         let elapsed = start.elapsed();
-        println!("prove_{:?}: {:.2?}", algorithm, elapsed);
+        println!("prove_time: {:.2?}", elapsed);
 
-        println!("mult_bb was called {} times", get_bb_count());
+        // println!("mult_bb was called {} times", get_bb_count());
 
         let mut round_t_v = round_t;
         if algorithm != AlgorithmType::ToomCook {
@@ -150,25 +155,95 @@ mod fq4_tests {
 
     #[test]
     fn check_simple_sumcheck_product() {
+        let deg = 3;
+        let thresh = 2;
+        //
+        // NAIVE
+        //
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(14, 3, 3, AlgorithmType::Precomputation, 1)
+            sumcheck_test_helper(10, deg, thresh, AlgorithmType::Naive, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(12, deg, thresh, AlgorithmType::Naive, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(14, deg, thresh, AlgorithmType::Naive, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::Naive, 1)
                 .1
                 .unwrap(),
             true
         );
 
+        //
+        // Algorithm 3
+        //
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(14, 3, 3, AlgorithmType::Naive, 1)
+            sumcheck_test_helper(10, deg, thresh, AlgorithmType::Precomputation, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(12, deg, thresh, AlgorithmType::Precomputation, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(14, deg, thresh, AlgorithmType::Precomputation, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::Precomputation, 1)
                 .1
                 .unwrap(),
             true
         );
 
+        //
+        // Algorithm 4
+        //
         assert_eq!(
-            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
-            sumcheck_test_helper(14, 3, 3, AlgorithmType::ToomCook, 1)
+            sumcheck_test_helper(10, deg, thresh, AlgorithmType::ToomCook, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            sumcheck_test_helper(12, deg, thresh, AlgorithmType::ToomCook, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            sumcheck_test_helper(14, deg, thresh, AlgorithmType::ToomCook, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::ToomCook, 1)
                 .1
                 .unwrap(),
             true
