@@ -1,5 +1,6 @@
 mod btf_transcript;
 pub mod data_structures;
+pub mod eq_poly;
 pub mod error;
 mod extension_transcript;
 pub mod prover;
