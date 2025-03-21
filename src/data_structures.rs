@@ -3,6 +3,8 @@ use std::{
     vec,
 };
 
+use itertools::Itertools;
+
 use num::One;
 use num::Zero;
 use rayon::prelude::*;
@@ -278,7 +280,7 @@ pub struct MatrixPolynomial<F: TowerField> {
 ///
 /// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix (integer) form.
 ///
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MatrixPolynomialInt<T> {
     pub no_of_rows: usize,
     pub no_of_columns: usize,
@@ -309,6 +311,14 @@ where
             no_of_columns: mid_point,
             evaluation_rows: vec![first_half.to_vec(), second_half.to_vec()],
         }
+    }
+
+    pub fn get_column(&self, column_index: usize) -> Vec<T> {
+        let mut column = Vec::with_capacity(self.no_of_rows);
+        for i in 0..self.no_of_rows {
+            column.push(self.evaluation_rows[i][column_index]);
+        }
+        column
     }
 
     pub fn heighten(&mut self) {
@@ -365,6 +375,45 @@ where
                 local_output.iter().copied().sum()
             })
             .collect()
+    }
+
+    // We want to compute tensor product of the columns of the matrices and store them in a vector.
+    pub fn tensor_column_products(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<Vec<T>>
+    where
+        T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        // Use parallel iteration over columns
+        (0..col_count)
+            .into_par_iter()
+            .map(|i| {
+                // Get all columns at index i for each matrix
+                let columns: Vec<Vec<T>> =
+                    matrices.iter().map(|matrix| matrix.get_column(i)).collect();
+
+                // Compute the tensor product of the columns
+                columns
+                    .into_iter()
+                    .multi_cartesian_product()
+                    .map(|comb| {
+                        // Multiply all the elements in the combination
+                        comb.iter().fold(T::one(), |mut acc, c_value| {
+                            acc *= *c_value;
+                            acc
+                        })
+                    })
+                    .collect::<Vec<T>>()
+            })
+            .collect::<Vec<Vec<T>>>()
     }
 
     pub fn compute_merkle_roots(
@@ -533,6 +582,14 @@ where
                     .collect(),
             ],
         }
+    }
+
+    pub fn get_column(&self, column_index: usize) -> Vec<F> {
+        let mut column = Vec::with_capacity(self.no_of_rows);
+        for i in 0..self.no_of_rows {
+            column.push(self.evaluation_rows[i][column_index]);
+        }
+        column
     }
 
     pub fn heighten(&mut self) {
@@ -725,6 +782,47 @@ where
         }
 
         output
+    }
+
+    pub fn tensor_column_products<P>(
+        matrices: &Vec<MatrixPolynomial<F>>,
+        mult_bb: &P,
+    ) -> Vec<Vec<F>>
+    where
+        P: Fn(&F, &F) -> F + std::marker::Sync,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        // Use parallel iteration over columns
+        (0..col_count)
+            .into_par_iter()
+            .map(|i| {
+                // Get all columns at index i for each matrix
+                let columns: Vec<Vec<F>> =
+                    matrices.iter().map(|matrix| matrix.get_column(i)).collect();
+
+                // Compute the tensor product of the columns
+                columns
+                    .into_iter()
+                    .multi_cartesian_product()
+                    .map(|comb| {
+                        // Multiply all the elements in the combination
+                        comb.iter().fold(F::one(), |mut acc, c_value| {
+                            acc = mult_bb(&acc, &c_value);
+                            acc
+                        })
+                    })
+                    .collect::<Vec<F>>()
+            })
+            .collect::<Vec<Vec<F>>>()
     }
 
     pub fn collapse(&mut self) {
@@ -1247,6 +1345,75 @@ mod test {
                     }
                     let index = k + j * num_rows + i * num_rows * num_rows;
                     assert_eq!(expected, output_3[index as usize]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_matrix_polynomial_tensor_columns_product() {
+        let num_variables = 6;
+        let num_evaluations: usize = (1 as usize) << num_variables;
+        let evaluations_a = F::rand_vector(num_evaluations, Some(4));
+        let evaluations_b = F::rand_vector(num_evaluations, Some(4));
+        let evaluations_c = F::rand_vector(num_evaluations, Some(4));
+        fn mult_bb(left: &F, right: &F) -> F {
+            left * right
+        }
+
+        let mut matrix_poly_a = MatrixPolynomial::from_evaluations_vec(&evaluations_a);
+        let mut matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&evaluations_b);
+        let mut matrix_poly_c = MatrixPolynomial::from_evaluations_vec(&evaluations_c);
+
+        // First flatten all matrix polynomials
+        flatten(&mut matrix_poly_a);
+        flatten(&mut matrix_poly_b);
+        flatten(&mut matrix_poly_c);
+
+        let output_1 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+
+        let mut expected = Vec::with_capacity(num_evaluations as usize);
+        for (a, b, c) in izip!(&evaluations_a, &evaluations_b, &evaluations_c) {
+            expected.push(vec![a * b * c.clone()]);
+        }
+        assert_eq!(output_1.len(), num_evaluations as usize);
+        assert_eq!(expected, output_1);
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+
+        let output_2 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_2.len(), num_evaluations / 2);
+        assert_eq!(output_2[0].len(), 1 << 3);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        let num_cols = matrix_poly_a.no_of_columns;
+        for col_idx in 0..num_cols {
+            for i in 0..num_rows {
+                for j in 0..num_rows {
+                    for k in 0..num_rows {
+                        let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                            * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                            * matrix_poly_c.evaluation_rows[k as usize][col_idx];
+                        let index = k + j * num_rows + i * num_rows * num_rows;
+                        assert_eq!(expected, output_2[col_idx][index as usize]);
+                    }
                 }
             }
         }
