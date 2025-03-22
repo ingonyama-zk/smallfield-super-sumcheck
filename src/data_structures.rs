@@ -1,13 +1,12 @@
 use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub},
-    slice::SliceIndex,
     vec,
 };
 
 use itertools::Itertools;
 
+use num::One;
 use num::Zero;
-use num::{pow, One};
 use rayon::prelude::*;
 
 use ark_std::{
