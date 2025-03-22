@@ -866,6 +866,39 @@ where
         (even_subtensor, odd_subtensor)
     }
 
+    pub fn extract_subtensor_with_offset(
+        tensor: &Vec<F>,
+        d: usize,
+        step: usize,
+        offset: usize,
+    ) -> Vec<F> {
+        let current_len = tensor.len();
+        assert!(current_len.is_power_of_two());
+        assert!(step.is_power_of_two());
+        let n: usize = 1 << (log2(current_len) as usize / d);
+        let m = n / step; // Reduced size per dimension
+        let mut subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+
+        // Generate selected indices for each dimension: {0, s, 2s, 3s, ...}
+        let selected_indices: Vec<usize> = (0..n).step_by(step).collect();
+
+        // Generate selected indices with offset for each dimension: {o, s + o, 2s + o, ...}
+        let offset_indices: Vec<usize> =
+            selected_indices.iter().map(|&v| (v + offset) % n).collect();
+
+        // Compute all index combinations efficiently using cartesian product of even indices
+        vec![offset_indices.clone(); d as usize]
+            .into_iter()
+            .multi_cartesian_product()
+            .for_each(|indices| {
+                // Compute 1D row-major index
+                let index = indices.iter().fold(0, |acc, &v| acc * n + v);
+                subtensor.push(tensor[index]);
+            });
+
+        subtensor
+    }
+
     pub fn dot_product<OtherF, P>(
         lhs: &MatrixPolynomial<F>,
         rhs: &MatrixPolynomial<OtherF>,
@@ -1525,6 +1558,41 @@ mod test {
                 output_1[output_2.len() + i].len()
             );
             assert_eq!(odd_extracted_subtensor, output_1[output_2.len() + i]);
+        }
+
+        // Okay so we want to extract full subtensors from output_3
+        // The idea is that we are only going to pre-compute output_3 and then extract subtensors
+        // from it, and use them. In this case, we will then compare the extracted subtensors with
+        // the pre-computed output_2 and output_1.
+        //
+        // Check if extract subtensors with offset works as intended
+        let mut subtensor_output_2 = Vec::with_capacity(num_evaluations / 2);
+        let step_2 = 2;
+        for offset in 0..step_2 {
+            for output_3_tensor in output_3.iter() {
+                let extracted_subtensor = MatrixPolynomial::extract_subtensor_with_offset(
+                    output_3_tensor,
+                    4,
+                    step_2,
+                    offset,
+                );
+                subtensor_output_2.push(extracted_subtensor);
+            }
+        }
+        assert_eq!(subtensor_output_2, output_2);
+
+        let mut subtensor_output_1 = Vec::with_capacity(num_evaluations);
+        let step_1 = 4;
+        for offset in 0..step_1 {
+            for output_3_tensor in output_3.iter() {
+                let extracted_subtensor = MatrixPolynomial::extract_subtensor_with_offset(
+                    output_3_tensor,
+                    4,
+                    step_1,
+                    offset,
+                );
+                subtensor_output_1.push(extracted_subtensor);
+            }
         }
     }
 
