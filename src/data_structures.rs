@@ -840,27 +840,30 @@ where
         }
     }
 
-    pub fn extract_subtensor(tensor: &Vec<F>, d: usize) -> Vec<F> {
+    pub fn extract_subtensors(tensor: &Vec<F>, d: usize) -> (Vec<F>, Vec<F>) {
         let current_len = tensor.len();
         assert!(current_len.is_power_of_two());
         let n: usize = 1 << (log2(current_len) as usize / d);
         let m = n / 2; // Reduced size per dimension (step = 2)
-        let mut subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+        let mut even_subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+        let mut odd_subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
 
         // Generate selected indices for each dimension: {0, 2, 4, 6, ...}
-        let selected_indices: Vec<usize> = (0..n).step_by(2).collect();
+        let even_indices: Vec<usize> = (0..n).step_by(2).collect();
 
-        // Compute all index combinations efficiently using cartesian product
-        vec![selected_indices.clone(); d as usize]
+        // Compute all index combinations efficiently using cartesian product of even indices
+        vec![even_indices.clone(); d as usize]
             .into_iter()
             .multi_cartesian_product()
             .for_each(|indices| {
                 // Compute 1D row-major index
-                let index = indices.iter().fold(0, |acc, &v| acc * n + v);
-                subtensor.push(tensor[index]);
+                let even_index = indices.iter().fold(0, |acc, &v| acc * n + v);
+                let odd_index = indices.iter().fold(0, |acc, &v| acc * n + ((v + 1) % n));
+                even_subtensor.push(tensor[even_index]);
+                odd_subtensor.push(tensor[odd_index]);
             });
 
-        subtensor
+        (even_subtensor, odd_subtensor)
     }
 
     pub fn dot_product<OtherF, P>(
@@ -1500,15 +1503,28 @@ mod test {
 
         // Check if the subtensor extraction works as intended
         for (i, output_3_tensor) in output_3.iter().enumerate() {
-            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_3_tensor, 4);
-            assert_eq!(extracted_subtensor.len(), output_2[i].len());
-            assert_eq!(extracted_subtensor, output_2[i]);
+            let (even_extracted_subtensor, odd_extracted_subtensor) =
+                MatrixPolynomial::extract_subtensors(output_3_tensor, 4);
+            assert_eq!(even_extracted_subtensor.len(), output_2[i].len());
+            assert_eq!(even_extracted_subtensor, output_2[i]);
+            assert_eq!(
+                odd_extracted_subtensor.len(),
+                output_2[output_3.len() + i].len()
+            );
+            assert_eq!(odd_extracted_subtensor, output_2[output_3.len() + i]);
         }
 
         for (i, output_2_tensor) in output_2.iter().enumerate() {
-            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_2_tensor, 4);
-            assert_eq!(extracted_subtensor.len(), output_1[i].len());
-            assert_eq!(extracted_subtensor, output_1[i]);
+            let (even_extracted_subtensor, odd_extracted_subtensor) =
+                MatrixPolynomial::extract_subtensors(output_2_tensor, 4);
+            assert_eq!(even_extracted_subtensor.len(), output_1[i].len());
+            assert_eq!(even_extracted_subtensor, output_1[i]);
+
+            assert_eq!(
+                odd_extracted_subtensor.len(),
+                output_1[output_2.len() + i].len()
+            );
+            assert_eq!(odd_extracted_subtensor, output_1[output_2.len() + i]);
         }
     }
 
