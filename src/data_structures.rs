@@ -1,12 +1,13 @@
 use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub},
+    slice::SliceIndex,
     vec,
 };
 
 use itertools::Itertools;
 
-use num::One;
 use num::Zero;
+use num::{pow, One};
 use rayon::prelude::*;
 
 use ark_std::{
@@ -840,6 +841,29 @@ where
         }
     }
 
+    pub fn extract_subtensor(tensor: &Vec<F>, d: usize) -> Vec<F> {
+        let current_len = tensor.len();
+        assert!(current_len.is_power_of_two());
+        let n: usize = 1 << (log2(current_len) as usize / d);
+        let m = n / 2; // Reduced size per dimension (step = 2)
+        let mut subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+
+        // Generate selected indices for each dimension: {0, 2, 4, 6, ...}
+        let selected_indices: Vec<usize> = (0..n).step_by(2).collect();
+
+        // Compute all index combinations efficiently using cartesian product
+        vec![selected_indices.clone(); d as usize]
+            .into_iter()
+            .multi_cartesian_product()
+            .for_each(|indices| {
+                // Compute 1D row-major index
+                let index = indices.iter().fold(0, |acc, &v| acc * n + v);
+                subtensor.push(tensor[index]);
+            });
+
+        subtensor
+    }
+
     pub fn dot_product<OtherF, P>(
         lhs: &MatrixPolynomial<F>,
         rhs: &MatrixPolynomial<OtherF>,
@@ -1416,6 +1440,51 @@ mod test {
                     }
                 }
             }
+        }
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+
+        let output_3 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_3.len(), num_evaluations / 4);
+        assert_eq!(output_3[0].len(), 1 << 6);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        let num_cols = matrix_poly_a.no_of_columns;
+        for col_idx in 0..num_cols {
+            for i in 0..num_rows {
+                for j in 0..num_rows {
+                    for k in 0..num_rows {
+                        let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                            * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                            * matrix_poly_c.evaluation_rows[k as usize][col_idx];
+                        let index = k + j * num_rows + i * num_rows * num_rows;
+                        assert_eq!(expected, output_3[col_idx][index as usize]);
+                    }
+                }
+            }
+        }
+
+        // Check if the subtensor extraction works as intended
+        for (i, output_3_tensor) in output_3.iter().enumerate() {
+            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_3_tensor, 3);
+            assert_eq!(extracted_subtensor.len(), output_2[i].len());
+            assert_eq!(extracted_subtensor, output_2[i]);
+        }
+
+        for (i, output_2_tensor) in output_2.iter().enumerate() {
+            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_2_tensor, 3);
+            assert_eq!(extracted_subtensor.len(), output_1[i].len());
+            assert_eq!(extracted_subtensor, output_1[i]);
         }
     }
 
