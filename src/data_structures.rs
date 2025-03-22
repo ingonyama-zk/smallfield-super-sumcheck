@@ -1381,6 +1381,7 @@ mod test {
         let evaluations_a = F::rand_vector(num_evaluations, Some(4));
         let evaluations_b = F::rand_vector(num_evaluations, Some(4));
         let evaluations_c = F::rand_vector(num_evaluations, Some(4));
+        let evaluations_d = F::rand_vector(num_evaluations, Some(4));
         fn mult_bb(left: &F, right: &F) -> F {
             left * right
         }
@@ -1388,24 +1389,32 @@ mod test {
         let mut matrix_poly_a = MatrixPolynomial::from_evaluations_vec(&evaluations_a);
         let mut matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&evaluations_b);
         let mut matrix_poly_c = MatrixPolynomial::from_evaluations_vec(&evaluations_c);
+        let mut matrix_poly_d = MatrixPolynomial::from_evaluations_vec(&evaluations_d);
 
         // First flatten all matrix polynomials
         flatten(&mut matrix_poly_a);
         flatten(&mut matrix_poly_b);
         flatten(&mut matrix_poly_c);
+        flatten(&mut matrix_poly_d);
 
         let output_1 = MatrixPolynomial::tensor_column_products(
             &vec![
                 matrix_poly_a.clone(),
                 matrix_poly_b.clone(),
                 matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
             ],
             &mult_bb,
         );
 
         let mut expected = Vec::with_capacity(num_evaluations as usize);
-        for (a, b, c) in izip!(&evaluations_a, &evaluations_b, &evaluations_c) {
-            expected.push(vec![a * b * c.clone()]);
+        for (a, b, c, d) in izip!(
+            &evaluations_a,
+            &evaluations_b,
+            &evaluations_c,
+            &evaluations_d,
+        ) {
+            expected.push(vec![a * b * c.clone() * d.clone()]);
         }
         assert_eq!(output_1.len(), num_evaluations as usize);
         assert_eq!(expected, output_1);
@@ -1414,17 +1423,19 @@ mod test {
         matrix_poly_a.heighten();
         matrix_poly_b.heighten();
         matrix_poly_c.heighten();
+        matrix_poly_d.heighten();
 
         let output_2 = MatrixPolynomial::tensor_column_products(
             &vec![
                 matrix_poly_a.clone(),
                 matrix_poly_b.clone(),
                 matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
             ],
             &mult_bb,
         );
         assert_eq!(output_2.len(), num_evaluations / 2);
-        assert_eq!(output_2[0].len(), 1 << 3);
+        assert_eq!(output_2[0].len(), 1 << 4);
 
         let num_rows = matrix_poly_a.no_of_rows;
         let num_cols = matrix_poly_a.no_of_columns;
@@ -1432,11 +1443,17 @@ mod test {
             for i in 0..num_rows {
                 for j in 0..num_rows {
                     for k in 0..num_rows {
-                        let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
-                            * matrix_poly_b.evaluation_rows[j as usize][col_idx]
-                            * matrix_poly_c.evaluation_rows[k as usize][col_idx];
-                        let index = k + j * num_rows + i * num_rows * num_rows;
-                        assert_eq!(expected, output_2[col_idx][index as usize]);
+                        for l in 0..num_rows {
+                            let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                                * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                                * matrix_poly_c.evaluation_rows[k as usize][col_idx]
+                                * matrix_poly_d.evaluation_rows[l as usize][col_idx];
+                            let index = l
+                                + k * num_rows
+                                + j * num_rows * num_rows
+                                + i * num_rows * num_rows * num_rows;
+                            assert_eq!(expected, output_2[col_idx][index as usize]);
+                        }
                     }
                 }
             }
@@ -1446,17 +1463,19 @@ mod test {
         matrix_poly_a.heighten();
         matrix_poly_b.heighten();
         matrix_poly_c.heighten();
+        matrix_poly_d.heighten();
 
         let output_3 = MatrixPolynomial::tensor_column_products(
             &vec![
                 matrix_poly_a.clone(),
                 matrix_poly_b.clone(),
                 matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
             ],
             &mult_bb,
         );
         assert_eq!(output_3.len(), num_evaluations / 4);
-        assert_eq!(output_3[0].len(), 1 << 6);
+        assert_eq!(output_3[0].len(), 1 << 8);
 
         let num_rows = matrix_poly_a.no_of_rows;
         let num_cols = matrix_poly_a.no_of_columns;
@@ -1464,11 +1483,17 @@ mod test {
             for i in 0..num_rows {
                 for j in 0..num_rows {
                     for k in 0..num_rows {
-                        let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
-                            * matrix_poly_b.evaluation_rows[j as usize][col_idx]
-                            * matrix_poly_c.evaluation_rows[k as usize][col_idx];
-                        let index = k + j * num_rows + i * num_rows * num_rows;
-                        assert_eq!(expected, output_3[col_idx][index as usize]);
+                        for l in 0..num_rows {
+                            let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                                * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                                * matrix_poly_c.evaluation_rows[k as usize][col_idx]
+                                * matrix_poly_d.evaluation_rows[l as usize][col_idx];
+                            let index = l
+                                + k * num_rows
+                                + j * num_rows * num_rows
+                                + i * num_rows * num_rows * num_rows;
+                            assert_eq!(expected, output_3[col_idx][index as usize]);
+                        }
                     }
                 }
             }
@@ -1476,13 +1501,13 @@ mod test {
 
         // Check if the subtensor extraction works as intended
         for (i, output_3_tensor) in output_3.iter().enumerate() {
-            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_3_tensor, 3);
+            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_3_tensor, 4);
             assert_eq!(extracted_subtensor.len(), output_2[i].len());
             assert_eq!(extracted_subtensor, output_2[i]);
         }
 
         for (i, output_2_tensor) in output_2.iter().enumerate() {
-            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_2_tensor, 3);
+            let extracted_subtensor = MatrixPolynomial::extract_subtensor(output_2_tensor, 4);
             assert_eq!(extracted_subtensor.len(), output_1[i].len());
             assert_eq!(extracted_subtensor, output_1[i]);
         }
