@@ -899,6 +899,26 @@ where
         subtensor
     }
 
+    pub fn extract_subtensors_from_tensors(
+        tensors: &Vec<Vec<F>>,
+        d: usize,
+        step: usize,
+    ) -> Vec<Vec<F>> {
+        let current_len = tensors[0].len();
+        assert!(current_len.is_power_of_two());
+        assert!(step.is_power_of_two());
+        let mut subtensors: Vec<Vec<F>> = Vec::with_capacity(step * tensors.len());
+
+        for offset in 0..step {
+            for tensor in tensors.iter() {
+                subtensors.push(MatrixPolynomial::extract_subtensor_with_offset(
+                    tensor, d, step, offset,
+                ));
+            }
+        }
+        subtensors
+    }
+
     pub fn dot_product<OtherF, P>(
         lhs: &MatrixPolynomial<F>,
         rhs: &MatrixPolynomial<OtherF>,
@@ -1594,6 +1614,15 @@ mod test {
                 subtensor_output_1.push(extracted_subtensor);
             }
         }
+
+        // Lets also check if the combined extraction of subtensors works as intended
+        let combined_output_2_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 2);
+        assert_eq!(combined_output_2_from_output_3, output_2);
+
+        let combined_output_1_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 4);
+        assert_eq!(combined_output_1_from_output_3, output_1);
     }
 
     #[test]
