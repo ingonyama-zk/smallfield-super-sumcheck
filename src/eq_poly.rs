@@ -13,10 +13,18 @@ impl<F: TowerField> EqPoly<F> {
     }
 
     /// Compute the evaluations of the polynomial at the powers of the basis
-    /// Lemma 1 from the paper: https://eprint.iacr.org/2025/105.pdf
-    /// This function requires 2m multiplications
+    /// Suppose the basis is [a, b, c], then the evaluations are:
+    /// Stage 1    Stage 2                Stage 3
+    /// [1 - a]    [1 - a] * [1 - b]      [1 - a] * [1 - b] * [1 - c]
+    /// [a]        [1 - a] * [b]          [1 - a] * [1 - b] * [c]
+    ///            [a] * [1 - b]          [1 - a] * [b] * [1 - c]
+    ///            [a] * [b]              [1 - a] * [b] * [c]
+    ///                                   [a] * [1 - b] * [1 - c]
+    ///                                   [a] * [1 - b] * [c]
+    ///                                   [a] * [b] * [1 - c]
+    ///                                   [a] * [b] * [c]
     ///
-    pub fn compute_evals(&self) -> Vec<F> {
+    pub fn compute_staged_evals(&self) -> Vec<Vec<F>> {
         let mut staged_evals = Vec::with_capacity(self.log_size);
         staged_evals.push(vec![F::one() - self.basis[0], self.basis[0]]);
 
@@ -36,16 +44,29 @@ impl<F: TowerField> EqPoly<F> {
                 .map(|(&x, &y)| x - y)
                 .collect();
 
-            staged_evals.push(
-                // concatenate the two vectors
-                current_evals_at_0
-                    .into_iter()
-                    .chain(current_evals_at_1)
-                    .collect(),
-            );
-        }
+            // Initialize the next inner vector in staged_evals
+            staged_evals.push(Vec::with_capacity(2 * staged_evals[i - 1].len()));
 
-        staged_evals.last().unwrap().to_vec()
+            for (l, r) in current_evals_at_0.iter().zip(current_evals_at_1.iter()) {
+                staged_evals[i].push(*l);
+                staged_evals[i].push(*r);
+            }
+        }
+        staged_evals
+    }
+
+    /// Compute the evaluations of the polynomial at the powers of the basis
+    /// Lemma 1 from the paper: https://eprint.iacr.org/2025/105.pdf
+    /// This function requires 2m multiplications
+    ///
+    pub fn compute_evals(&self) -> Vec<F> {
+        self.compute_staged_evals().last().unwrap().to_vec()
+    }
+
+    pub fn evaluate_at_variable(&self, variable_index: usize, value: F) -> Self {
+        let mut new_basis = self.basis.clone();
+        new_basis[variable_index] = value;
+        Self::new(new_basis)
     }
 
     pub fn to_linear_lagrange_list(&self) -> LinearLagrangeList<F> {
@@ -68,6 +89,7 @@ mod tests {
 
         let pairs = basis
             .iter()
+            .rev()
             .map(|&x| vec![F::one() - x, x])
             .collect::<Vec<Vec<F>>>();
 
