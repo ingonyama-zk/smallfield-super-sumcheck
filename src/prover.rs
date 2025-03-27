@@ -5,9 +5,6 @@ use crate::{
 use ark_std::{log2, vec::Vec};
 use merlin::Transcript;
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 // A sumcheck proof contains all round polynomials
 #[derive(PartialEq, Debug)]
 pub struct SumcheckProof<EF: TowerField> {
@@ -22,6 +19,7 @@ pub enum AlgorithmType {
     WitnessChallengeSeparation,
     Precomputation,
     ToomCook,
+    PrecomputationWithEq,
 }
 
 /// Prover State
@@ -99,6 +97,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         mult_ee: &EE,
         mult_bb: &BB,
         round_t: Option<usize>,
+        eq_challenges: Option<&Vec<EF>>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
         interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
@@ -126,11 +125,17 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .map(|_| vec![EF::zero(); r_degree + 1])
             .collect();
 
+        // Check if eq challenges length is equal to the number of variables
+        if let Some(eq_challenges) = eq_challenges {
+            assert_eq!(eq_challenges.len(), prover_state.num_vars);
+        }
+
         // Extract threshold round
         let round_threshold = match round_t {
             Some(t_value) => {
                 if (prover_state.algo == AlgorithmType::Precomputation)
                     || (prover_state.algo == AlgorithmType::ToomCook)
+                    || (prover_state.algo == AlgorithmType::PrecomputationWithEq)
                 {
                     assert!(t_value <= prover_state.num_vars);
                     t_value
@@ -187,6 +192,20 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 interpolation_maps_ef.unwrap(),
                 ef_combine_function,
             ),
+            AlgorithmType::PrecomputationWithEq => {
+                Self::prove_with_eq_precomputation_agorithm::<BE, EE, BB, EC>(
+                    prover_state,
+                    transcript,
+                    &mut r_polys,
+                    &eq_challenges.unwrap(),
+                    round_threshold,
+                    round_threshold,
+                    mult_be,
+                    mult_ee,
+                    mult_bb,
+                    ef_combine_function,
+                )
+            }
         }
 
         SumcheckProof {

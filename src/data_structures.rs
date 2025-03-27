@@ -17,6 +17,20 @@ use ark_std::{
 
 use crate::tower_fields::TowerField;
 
+pub fn print_collection<T, F>(collection: &[Vec<T>], get_val_fn: F)
+where
+    T: std::fmt::Debug, // Ensure T implements the Debug trait
+    F: Fn(&T) -> u128,  // get_val_fn should return a value that can be printed
+{
+    for (i, row) in collection.iter().enumerate() {
+        print!("row_{}: ", i);
+        for col in row.iter() {
+            print!("{:?} ", get_val_fn(col)); // Print the value of the struct
+        }
+        println!();
+    }
+}
+
 pub fn bit_decompose(input: usize, input_bit_len: usize, slice_len: usize) -> Vec<usize> {
     let max_input = (1 as usize) << input_bit_len;
     assert!(input < max_input);
@@ -808,6 +822,8 @@ where
                 // Get all columns at index i for each matrix
                 let columns: Vec<Vec<F>> =
                     matrices.iter().map(|matrix| matrix.get_column(i)).collect();
+
+                print_collection(&columns, |col| col.get_val());
 
                 // Compute the tensor product of the columns
                 columns

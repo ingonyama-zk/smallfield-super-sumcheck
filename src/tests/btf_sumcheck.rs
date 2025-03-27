@@ -125,6 +125,7 @@ mod fq4_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
+            None,
             Some(&emaps_base),
             Some(&projective_map_indices),
             Some(&imaps_base),

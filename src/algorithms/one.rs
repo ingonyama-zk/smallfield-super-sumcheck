@@ -57,6 +57,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
         }
 
+        // print round number and current round polynomial
+        println!("Algo1: Round number = {}", round_number);
+        println!(
+            "round polynomial: {:#?}",
+            round_polynomials[round_number - 1]
+        );
+
         // append the round polynomial (i.e. prover message) to the transcript
         <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,
@@ -65,10 +72,12 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         );
 
         // generate challenge α_i = H( transcript );
-        let alpha: EF = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
+        let mut alpha: EF = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
             transcript,
             b"challenge_nextround",
         );
+
+        alpha = EF::new(13, Some(4)) * EF::new(round_number as u128, Some(4));
 
         return alpha;
     }

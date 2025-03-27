@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod simple_extension_tests {
     use crate::data_structures::LinearLagrangeList;
+    use crate::eq_poly::EqPoly;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;
@@ -77,6 +78,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -166,6 +168,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -263,6 +266,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
@@ -354,6 +358,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -369,6 +374,218 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
+        let result = IPForMLSumcheck::<EF, BF>::verify(
+            to_ef(&claimed_sum),
+            &proof,
+            &mut verifier_transcript,
+            AlgorithmType::Precomputation,
+            None,
+            None,
+        );
+        assert_eq!(result.unwrap(), true);
+
+        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
+        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
+            to_ef(&claimed_sum),
+            &proof_dup,
+            &mut verifier_transcript_dup,
+            AlgorithmType::Naive,
+            None,
+            None,
+        );
+        assert_eq!(result_dup.unwrap(), true);
+    }
+
+    #[test]
+    fn test_product_sumcheck_with_algorithm_3_eq() {
+        // Define the combine function
+        fn combine_fn_bf(data: &Vec<BF>) -> EF {
+            assert!(data.len() == 3);
+            to_ef(&(data[0] * data[1] * data[2]))
+        }
+
+        fn combine_fn_ef(data: &Vec<EF>) -> EF {
+            assert!(data.len() == 3);
+            data[0] * data[1] * data[2]
+        }
+
+        // Convert a base field element to an extension field element
+        fn to_ef(base_field_element: &BF) -> EF {
+            EF::new(base_field_element.get_val(), None)
+        }
+
+        // Multiplies a base field element to an extension field element
+        fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
+            extension_field_element * base_field_element
+        }
+
+        // Adds two extension field elements
+        fn add_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 + ee_element2
+        }
+
+        // Multiplies an extension field element to an extension field element
+        fn mult_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 * ee_element2
+        }
+
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
+        // I want to print multiplication matrix for debugging
+        // Print a matrix of multiplication of basic numbers
+        // Say we have 4 numbers: 1, 2, 3, 4
+        // The matrix will be:
+        // ┌         ┐
+        // │ 1 2 3 4 │
+        // │ 2 4 6 8 │
+        // │ 3 6 9 12│
+        // │ 4 8 12 16│
+        // └         ┘
+        fn print_multiplication_table(n: usize) {
+            // Generate numbers from 0 to n
+            let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
+
+            // Print the header row
+            print!("    ");
+            for &num in &numbers {
+                print!(" {:3}   ", num);
+            }
+            println!();
+            println!("   ----------------------------------------");
+
+            // Print the multiplication table
+            for &i in &numbers {
+                print!("{:3} | ", i);
+                for &j in &numbers {
+                    print!("{:3}  ", (i * j).get_val());
+                }
+                println!();
+            }
+            println!("   ----------------------------------------");
+        }
+        fn print_addition_table(n: usize) {
+            // Generate numbers from 0 to n
+            let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
+
+            // Print the header row
+            print!("    ");
+            for &num in &numbers {
+                print!(" {:3}   ", num);
+            }
+            println!();
+            println!("   ----------------------------------------");
+
+            // Print the multiplication table
+            for &i in &numbers {
+                print!("{:3} | ", i);
+                for &j in &numbers {
+                    print!("{:3}  ", (i + j).get_val());
+                }
+                println!();
+            }
+            println!("   ----------------------------------------");
+        }
+        println!("MULT:");
+        print_multiplication_table(15);
+        println!("ADD:");
+        print_addition_table(15);
+
+        // Take two simple polynomial
+        let num_variables = 4;
+        let num_evaluations = (1 as u32) << num_variables;
+        let evaluations_a: Vec<BF> = (0..num_evaluations)
+            .map(|i| BF::from((2 * i) % 7))
+            .collect();
+        let evaluations_b: Vec<BF> = (0..num_evaluations)
+            .map(|i| BF::from((i + 1) % 7))
+            .collect();
+        let evaluations_c: Vec<BF> = (0..num_evaluations)
+            .map(|i| BF::from((i + 2) % 7))
+            .collect();
+        let claimed_sum = (0..num_evaluations)
+            .map(|i| BF::from((2 * i) % 7) * BF::from((i + 1) % 7) * BF::from((i + 2) % 7))
+            .fold(BF::zero(), |acc, val| acc + val);
+
+        let polynomials: Vec<LinearLagrangeList<BF>> = vec![
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_c),
+        ];
+
+        println!("Polynomials: {:#?}", polynomials);
+
+        // Dummy eq challenges: [2, 3, ..., n+1]
+        let dummy_eq_challenges: Vec<EF> = (0..num_variables)
+            .map(|i| EF::from((i + 2) as u64))
+            .collect();
+
+        let mut prover_state: ProverState<EF, BF> =
+            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::PrecomputationWithEq);
+        let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
+        let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
+            &mut prover_state,
+            &combine_fn_ef,
+            &combine_fn_bf,
+            &mut prover_transcript,
+            &to_ef,
+            &mult_be,
+            &add_ee,
+            &mult_ee,
+            &mult_bb,
+            Some(2),
+            Some(&dummy_eq_challenges),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        // We want to compare round polynomial using Algo3Eq and Naive algorithm
+        let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
+        let fourth_poly = dumm_eq_poly.compute_evals();
+
+        let mut new_polynomials = polynomials.clone();
+        new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
+
+        println!("New Polynomials: {:#?}", new_polynomials);
+
+        // Define the combine function
+        fn combine_fn_bf_4(data: &Vec<BF>) -> EF {
+            assert!(data.len() == 4);
+            to_ef(&(data[0] * data[1] * data[2] * data[3]))
+        }
+
+        fn combine_fn_ef_4(data: &Vec<EF>) -> EF {
+            assert!(data.len() == 4);
+            data[0] * data[1] * data[2] * data[3]
+        }
+
+        let mut prover_state_dup: ProverState<EF, BF> =
+            IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);
+        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
+        let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
+            &mut prover_state_dup,
+            &combine_fn_ef_4,
+            &combine_fn_bf_4,
+            &mut prover_transcript_dup,
+            &to_ef,
+            &mult_be,
+            &add_ee,
+            &mult_ee,
+            &mult_bb,
+            None,
             None,
             None,
             None,
@@ -524,6 +741,7 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
+            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -543,6 +761,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -716,6 +935,7 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
+            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -735,6 +955,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -910,6 +1131,7 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             Some(3),
+            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -929,6 +1151,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -1036,6 +1259,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
