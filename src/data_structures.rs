@@ -1623,6 +1623,11 @@ mod test {
         let combined_output_1_from_output_3 =
             MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 4);
         assert_eq!(combined_output_1_from_output_3, output_1);
+
+        // Check also if extracting subtensors with step = 1 just returns the input
+        let combined_output_3_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 1);
+        assert_eq!(combined_output_3_from_output_3, output_3);
     }
 
     #[test]
