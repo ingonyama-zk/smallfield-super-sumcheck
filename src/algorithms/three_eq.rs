@@ -355,7 +355,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // [ .. ]
         // [ (α_1)(α_2)...(α_m) ]
         let mut challenge_matrix_polynomial: MatrixPolynomial<EF> = MatrixPolynomial::one();
+        let mut challenge_vector: Vec<EF> = Vec::with_capacity(round_small_val);
 
+        let mut eq_1_left_cumulative = EF::one();
         for round_num in 1..=round_small_val {
             // Compute challenge terms for 2^{(r - 1) * d} terms
             let mut gamma_matrix = challenge_matrix_polynomial.clone();
@@ -364,30 +366,52 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     gamma_matrix.tensor_hadamard_product(&challenge_matrix_polynomial, &mult_ee);
             }
 
-            // Compute the challenge term mixed with the left eq1 polynomial
+            if round_num > 1 {
+                // Compute the current eq1 left and challenge value
+                let eq_challenge = eq_challenges[round_num - 2];
+                let one_minus_eq_challenge = EF::one() - eq_challenge;
+                let prev_round_challenge = challenge_vector.last().unwrap();
+                let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
+
+                // TODO: can use one ee_mult instead of two here!
+                let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
+                    + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+                eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
+                println!("eq1 left cumulative:");
+                println!("{:#?}", eq_1_left_cumulative);
+            }
 
             // Compute round polynomial at k ∈ [0, 1, ..., d]
             let mut intermediate_round_poly: Vec<EF> =
                 Vec::with_capacity(num_round_poly_evals as usize);
             for k in 0..num_round_poly_evals {
-                // Fetch the eq1 left evaluations for this round, and compute its inner product with the challenge matrix
-                let eq_1_left_evals = &eq_1_left_staged_evals[round_num - 1];
-                assert_eq!(
-                    eq_1_left_evals.len(),
-                    challenge_matrix_polynomial.no_of_rows
-                );
-                let eq_1_left_and_challenge_value = challenge_matrix_polynomial
-                    .evaluation_rows
-                    .iter()
-                    .zip(eq_1_left_evals.iter())
-                    .map(|(challenge_multiplicand, eq_val)| {
-                        mult_ee(eq_val, &challenge_multiplicand[0])
-                    })
-                    .fold(EF::zero(), |acc, val| acc + val);
+                //
+                // Round polynomial is of the form:
+                //
+                // s_i(k) = eq1_left * eq1_center * ∑ ∑ ... ∑ round_challenge_terms * pre_computed_i(k)
+                //
+                // Lets start with the outer equality polynomial terms:
+                // +------------+----------------------------+------------------------+
+                // |            | Eq challenges              | Round challenges       |
+                // +------------+----------------------------+------------------------+
+                // | eq1 left   | α_1, α_2, ..., α_{i-1} ]   | r_1, r_2, ..., r_{i-1} |
+                // | eq1 center | α_i                        | r_i                    |
+                // +------------+----------------------------+------------------------+
+                //
+                // We have the eq1 left evaluation in the eq1_left_cumulative variable
+                // Lets compute the eq1 centre evaluation
+                // Compute the eq1 centre evaluation
+                // TODO: can use one be_mult instead of two here!
+                let k_val = BF::new(k as u128, Some(3));
+                let one_minus_k_val = BF::one() - k_val;
+                let eq_challenge_value = eq_challenges[round_num - 1];
+                let one_minus_eq_challenge_value = EF::one() - eq_challenge_value;
+                let eq_1_center_evaluation =
+                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
+                        + mult_be(&k_val, &eq_challenge_value);
 
-                println!("round_num = {} and k = {}", round_num, k);
-                println!("eq1 left and challenge value:");
-                println!("{:#?}", eq_1_left_and_challenge_value);
+                println!("eq1 center evaluation:");
+                println!("{:#?}", eq_1_center_evaluation);
 
                 // Fetch the precomputed array for this round and k and compute the inner product with the gamma matrix
                 let precomputed_array_for_k = &pre_computed_array_with_eq[k][round_num - 1];
@@ -404,24 +428,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 println!("precomputed array and challenge value:");
                 println!("{:#?}", precomputed_array_and_challege_value);
 
-                // Compute the eq1 centre evaluation
-                let one_minus_k_val = BF::one() - BF::new(k as u128, Some(2));
-                let k_val = BF::new(k as u128, Some(2));
-                let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
-                let eq_challenge_value = eq_challenges[round_num - 1];
-                let eq_1_center_evaluation =
-                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
-                        + mult_be(&k_val, &eq_challenge_value);
-
-                println!("eq1 center evaluation:");
-                println!("{:#?}", eq_1_center_evaluation);
-
                 // The round polynomial value is simply the product of the:
                 // eq1 left value, eq 1 centre value and the precomputed array value
-                let intermediate_round_poly_evaluation = mult_ee(
-                    &eq_1_left_and_challenge_value,
-                    &precomputed_array_and_challege_value,
-                );
+                let intermediate_round_poly_evaluation =
+                    mult_ee(&eq_1_left_cumulative, &precomputed_array_and_challege_value);
 
                 round_polynomials[round_num - 1][k as usize] =
                     mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
@@ -462,7 +472,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             round_polynomials[round_num - 1].push(final_round_poly_eval);
 
             // print round number and current round polynomial
-            println!("Round number = {}", round_num);
+            println!("Algo3: Round number = {}", round_num);
             println!("round polynomial: {:#?}", round_polynomials[round_num - 1]);
 
             // append the round polynomial (i.e. prover message) to the transcript
@@ -479,6 +489,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             );
 
             alpha = EF::new(13, Some(4)) * EF::new(round_num as u128, Some(4));
+
+            // Store the challenge in the challenge vector
+            challenge_vector.push(alpha);
 
             // Update challenge matrix with new challenge
             let challenge_tuple_matrix =
