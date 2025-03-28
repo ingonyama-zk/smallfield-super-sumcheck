@@ -24,7 +24,18 @@ impl<F: TowerField> EqPoly<F> {
     ///                                   [a] * [b] * [1 - c]
     ///                                   [a] * [b] * [c]
     ///
-    pub fn compute_staged_evals(&self) -> Vec<Vec<F>> {
+    /// If the variable is_little_endian true, then the evaluations are:
+    /// Stage 1    Stage 2                Stage 3
+    /// [1 - a]    [1 - b] * [1 - a]      [1 - c] * [1 - b] * [1 - a]
+    /// [a]        [1 - b] * [a]          [1 - c] * [1 - b] * [a]
+    ///            [b] * [1 - a]          [1 - c] * [b] * [1 - a]
+    ///            [b] * [a]              [1 - c] * [b] * [a]
+    ///                                   [c] * [1 - b] * [1 - a]
+    ///                                   [c] * [1 - b] * [a]
+    ///                                   [c] * [b] * [1 - a]
+    ///                                   [c] * [b] * [a]
+    ///
+    pub fn compute_staged_evals(&self, is_little_endian: bool) -> Vec<Vec<F>> {
         let mut staged_evals = Vec::with_capacity(self.log_size);
         staged_evals.push(vec![F::one() - self.basis[0], self.basis[0]]);
 
@@ -47,9 +58,18 @@ impl<F: TowerField> EqPoly<F> {
             // Initialize the next inner vector in staged_evals
             staged_evals.push(Vec::with_capacity(2 * staged_evals[i - 1].len()));
 
-            for (l, r) in current_evals_at_0.iter().zip(current_evals_at_1.iter()) {
-                staged_evals[i].push(*l);
-                staged_evals[i].push(*r);
+            if is_little_endian {
+                for l in current_evals_at_0.iter() {
+                    staged_evals[i].push(*l);
+                }
+                for r in current_evals_at_1.iter() {
+                    staged_evals[i].push(*r);
+                }
+            } else {
+                for (l, r) in current_evals_at_0.iter().zip(current_evals_at_1.iter()) {
+                    staged_evals[i].push(*l);
+                    staged_evals[i].push(*r);
+                }
             }
         }
         staged_evals
@@ -59,8 +79,11 @@ impl<F: TowerField> EqPoly<F> {
     /// Lemma 1 from the paper: https://eprint.iacr.org/2025/105.pdf
     /// This function requires 2m multiplications
     ///
-    pub fn compute_evals(&self) -> Vec<F> {
-        self.compute_staged_evals().last().unwrap().to_vec()
+    pub fn compute_evals(&self, is_little_endian: bool) -> Vec<F> {
+        self.compute_staged_evals(is_little_endian)
+            .last()
+            .unwrap()
+            .to_vec()
     }
 
     pub fn evaluate_at_variable(&self, variable_index: usize, value: F) -> Self {
@@ -70,7 +93,7 @@ impl<F: TowerField> EqPoly<F> {
     }
 
     pub fn to_linear_lagrange_list(&self) -> LinearLagrangeList<F> {
-        LinearLagrangeList::from_vector(&self.compute_evals())
+        LinearLagrangeList::from_vector(&self.compute_evals(false))
     }
 }
 
@@ -85,21 +108,31 @@ mod tests {
     fn test_eq_poly() {
         let basis = vec![F::new(2, Some(2)), F::new(3, Some(2)), F::new(4, Some(2))];
         let eq_poly = EqPoly::new(basis.clone());
-        let evals = eq_poly.compute_evals();
+        let evals = eq_poly.compute_evals(false);
+        let evals_big_endian = eq_poly.compute_evals(true);
 
-        let pairs = basis
+        let big_endian_pairs = basis
             .iter()
             .rev()
             .map(|&x| vec![F::one() - x, x])
             .collect::<Vec<Vec<F>>>();
 
+        let little_endian_pairs = basis
+            .iter()
+            .map(|&x| vec![F::one() - x, x])
+            .collect::<Vec<Vec<F>>>();
+
         assert_eq!(evals.len(), 1 << basis.len());
+        assert_eq!(evals_big_endian.len(), 1 << basis.len());
         for index in 0..evals.len() {
             let mut res_index = F::one();
+            let mut res_index_big_endian = F::one();
             for i in 0..basis.len() {
-                res_index *= pairs[i][(index >> i) & 1];
+                res_index *= big_endian_pairs[i][(index >> i) & 1];
+                res_index_big_endian *= little_endian_pairs[i][(index >> i) & 1];
             }
             assert_eq!(res_index, evals[index]);
+            assert_eq!(res_index_big_endian, evals_big_endian[index]);
         }
     }
 }

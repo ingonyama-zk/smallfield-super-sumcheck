@@ -8,6 +8,7 @@ use crate::data_structures::{
 use crate::eq_poly::EqPoly;
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
+use crate::verifier::barycentric_interpolation;
 use crate::IPForMLSumcheck;
 
 impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
@@ -47,35 +48,44 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let (eq_1_basis, eq_2_basis) = eq_challenges.split_at(prover_state.num_vars / 2);
 
         // First equality polynomial is of the form: [ α_1, α_2, ..., α_{n/2} ]
-        // In round i, we further split it into two parts L and R as follows:
-        // eq1 L: [ α_1, α_2, ..., α_{i} ]
+        // In round i, we further split it into three parts L (left), C (centre) and R (right) as follows:
+        // eq1 L: [ α_1, α_2, ..., α_{i-1} ]
+        // eq1 C: [ α_i ]
         // eq1 R: [ α_{i+1}, α_{i+2}, ..., α_{n/2} ]
         // We compute the evaluations of eq1 L and eq1 R in the pre-computation phase.
         // Note that we reverse the eq1 R basis so that we get the required evaluations using staged evaluations.
         //
-        // For example for n = 6, if the first eq is [ α_1, α_2, α_3 ] we get the following evaluations:
+        // For example for n = 8, if the first eq is [ α_1, α_2, α_3, α_4 ] we get the following evaluations:
         //
-        // +-----+--------------------+----------------------+-------------------------------+
-        // | Eq1 | Round 1            | Round 2              | Round 3                       |
-        // +-----+--------------------+----------------------+-------------------------------+
-        // |     | (1 - α_1)          | (1 - α_1)(1 - α_2)   | (1 - α_1)(1 - α_2)(1 - α_3)   |
-        // |     | (α_1)              | (1 - α_1)(α_2)       | (1 - α_1)(1 - α_2)(α_3)       |
-        // |     |                    | (α_1)(1 - α_2)       | (1 - α_1)(α_2)(1 - α_3)       |
-        // | L   |                    | (α_1)(α_2)           | (1 - α_1)(α_2)(α_3)           |
-        // |     |                    |                      | (α_1)(1 - α_2)(1 - α_3)       |
-        // |     |                    |                      | (α_1)(1 - α_2)(α_3)           |
-        // |     |                    |                      | (α_1)(α_2)(1 - α_3)           |
-        // |     |                    |                      | (α_1)(α_2)(α_3)               |
-        // +-----+--------------------+----------------------+-------------------------------+
-        // |     | (1 - α_3)(1 - α_2) | (1 - α_3)            | 1                             |
-        // |     | (1 - α_3)(α_2)     | (α_3)                |                               |
-        // | R   | (α_3)(1 - α_2)     |                      |                               |
-        // |     | (α_3)(α_2)         |                      |                               |
-        // +-----+--------------------+----------------------+-------------------------------+
+        // +-----+-----------------------------+--------------------+--------------------+-----------------------------+
+        // | Eq1 | Round 1                     | Round 2            | Round 3            | Round 4                     |
+        // +-----+-----------------------------+--------------------+--------------------+-----------------------------+
+        // |     | 1                           | (1 - α_1)          | (1 - α_1)(1 - α_2) | (1 - α_1)(1 - α_2)(1 - α_3) |
+        // |     |                             | (α_1)              | (1 - α_1)(α_2)     | (1 - α_1)(1 - α_2)(α_3)     |
+        // |     |                             |                    | (α_1)(1 - α_2)     | (1 - α_1)(α_2)(1 - α_3)     |
+        // | L   |                             |                    | (α_1)(α_2)         | (1 - α_1)(α_2)(α_3)         |
+        // |     |                             |                    |                    | (α_1)(1 - α_2)(1 - α_3)     |
+        // |     |                             |                    |                    | (α_1)(1 - α_2)(α_3)         |
+        // |     |                             |                    |                    | (α_1)(α_2)(1 - α_3)         |
+        // |     |                             |                    |                    | (α_1)(α_2)(α_3)             |
+        // +-----+-----------------------------+--------------------+--------------------+-----------------------------+
+        // | C   | (1 - α_1)                   | (1 - α_2)          | (1 - α_3)          | (1 - α_4)                   |
+        // |     | (α_1)                       | (α_2)              | (α_3)              | (α_4)                       |
+        // +-----+-----------------------------+--------------------+--------------------+-----------------------------+
+        // |     | (1 - α_2)(1 - α_3)(1 - α_4) | (1 - α_3)(1 - α_4) | (1 - α_4)          | 1                           |
+        // |     | (1 - α_2)(1 - α_3)(α_4)     | (1 - α_3)(α_4)     | (α_4)              |                             |
+        // | R   | (1 - α_2)(α_3)(1 - α_4)     | (α_3)(1 - α_4)     |                    |                             |
+        // |     | (1 - α_2)(α_3)(α_4)         | (α_3)(α_4)         |                    |                             |
+        // |     | (α_2)(1 - α_3)(1 - α_4)     |                    |                    |                             |
+        // |     | (α_2)(1 - α_3)(α_4)         |                    |                    |                             |
+        // |     | (α_2)(α_3)(1 - α_4)         |                    |                    |                             |
+        // |     | (α_2)(α_3)(α_4)             |                    |                    |                             |
+        // +-----+-----------------------------+--------------------+--------------------+-----------------------------+
         //
         // TODO: Can we optimise by trying to compute L and R using common multiplications?
         //
-        let eq_1_left_basis = eq_1_basis.to_vec();
+        let mut eq_1_left_basis = eq_1_basis.to_vec();
+        eq_1_left_basis.pop();
         let mut eq_1_right_basis = eq_1_basis[1..].to_vec();
         eq_1_right_basis.reverse();
 
@@ -83,12 +93,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         println!("eq1 right basis: {:#?}", eq_1_right_basis);
 
         let eq_1_left_poly = EqPoly::new(eq_1_left_basis);
-        let eq_1_left_staged_evals = eq_1_left_poly.compute_staged_evals();
+        let mut eq_1_left_staged_evals = eq_1_left_poly.compute_staged_evals(false);
+        eq_1_left_staged_evals.insert(0, vec![EF::one()]);
 
         let eq_1_right_poly = EqPoly::new(eq_1_right_basis);
-        let mut eq_1_right_staged_evals = eq_1_right_poly.compute_staged_evals();
+        let mut eq_1_right_staged_evals = eq_1_right_poly.compute_staged_evals(true);
         eq_1_right_staged_evals.reverse();
-        eq_1_right_staged_evals.push(vec![EF::from(1u64)]);
+        eq_1_right_staged_evals.push(vec![EF::one()]);
 
         println!("Round 1:");
         println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[0]);
@@ -98,49 +109,66 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[1]);
         println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[1]);
 
+        println!("Round 3:");
+        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[2]);
+        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[2]);
+
         // Second equality polynomial is of the form: [ α_{n/2 + 1}, α_{n/2 + 2}, ..., α_n ]
         //
-        // For example, for n = 6, the second eq is [ α_4, α_5, α_6 ]
-        // Second eq poly is of the form (i.e., we do not store intermediate evaluations):
+        // For example, for n = 6, the second eq is [ α_5, α_6, α_7, α_8 ]
+        // and we get the following evaluations (without storing intermediate evaluations):
         //
-        // (1 - α_4)(1 - α_5)(1 - α_6)
-        // (1 - α_4)(1 - α_5)( α_6)
-        // (1 - α_4)(α_5)(1 - α_6)
-        // (1 - α_4)(α_5)(α_6)
-        // (α_4)(1 - α_5)(1 - α_6)
-        // (α_4)(1 - α_5)(α_6)
-        // (α_4)(α_5)(1 - α_6)
-        // (α_4)(α_5)(α_6)
+        // (1 - α_5)(1 - α_6)(1 - α_7)(1 - α_8)
+        // (1 - α_5)(1 - α_6)(1 - α_7)(α_8)
+        // (1 - α_5)(1 - α_6)(α_7)(1 - α_8)
+        // (1 - α_5)(1 - α_6)(α_7)(α_8)
+        // (1 - α_5)(α_6)(1 - α_7)(1 - α_8)
+        // (1 - α_5)(α_6)(1 - α_7)(α_8)
+        // (1 - α_5)(α_6)(α_7)(1 - α_8)
+        // (1 - α_5)(α_6)(α_7)(α_8)
+        // (α_5)(1 - α_6)(1 - α_7)(1 - α_8)
+        // (α_5)(1 - α_6)(1 - α_7)(α_8)
+        // (α_5)(1 - α_6)(α_7)(1 - α_8)
+        // (α_5)(1 - α_6)(α_7)(α_8)
+        // (α_5)(α_6)(1 - α_7)(1 - α_8)
+        // (α_5)(α_6)(1 - α_7)(α_8)
+        // (α_5)(α_6)(α_7)(1 - α_8)
+        // (α_5)(α_6)(α_7)(α_8)
         //
         // Note that second eq polynomial is constant in first n/2 rounds.
         //
         let eq_2_basis = eq_2_basis.to_vec();
         println!("eq2 basis: {:#?}", eq_2_basis);
         let eq_2_poly = EqPoly::new(eq_2_basis);
-        let eq_2_evals = eq_2_poly.compute_evals();
+        let eq_2_evals = eq_2_poly.compute_evals(false);
 
         println!("eq2 evals: {:#?}", eq_2_evals);
 
         // Assert that the number of evaluations is correct
         assert_eq!(eq_1_left_staged_evals.len(), eq_1_right_staged_evals.len());
         for i in 0..eq_1_right_staged_evals.len() {
-            let len_eq_1_left = eq_1_left_staged_evals[i].len();
-            let len_eq_1_right = eq_1_right_staged_evals[i].len();
-            assert_eq!(len_eq_1_left * len_eq_1_right, eq_2_evals.len());
-            assert_eq!(log2(eq_2_evals.len()) as usize, prover_state.num_vars / 2);
+            let len_eq_1_left = eq_1_left_staged_evals[i].len(); // 2^{i}
+            let len_eq_1_right = eq_1_right_staged_evals[i].len(); // 2^{n/2 - i - 1}
+            let log_len_eq_1 = log2(len_eq_1_left * len_eq_1_right) as usize; // n/2 - 1
+            let log_len_eq_2 = log2(eq_2_evals.len()) as usize; // n/2
+            assert_eq!(log_len_eq_1, (prover_state.num_vars / 2 - 1));
+            assert_eq!(log_len_eq_1 + log_len_eq_2, prover_state.num_vars - 1);
         }
 
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
-        // Round 1:
-        // row 0: [ p(0, x) ]
-        // row 1: [ p(1, x) ]
-        //
-        // Round 2:
-        // row 0: [ p(0, 0, x) ]
-        // row 1: [ p(0, 1, x) ]
-        // row 0: [ p(1, 0, x) ]
-        // row 1: [ p(1, 1, x) ]
+        // +---------------------+-------------------------+----------------------------+
+        // | Round 1:            |  Round 2:               |  Round 3:                  |
+        // +---------------------+-------------------------+----------------------------+
+        // | row 0: [ p(0, x) ]  |  row 0: [ p(0, 0, x) ]  |  row 0: [ p(0, 0, 0, x) ]  |
+        // | row 1: [ p(1, x) ]  |  row 1: [ p(0, 1, x) ]  |  row 1: [ p(0, 0, 1, x) ]  |
+        // |                     |  row 2: [ p(1, 0, x) ]  |  row 2: [ p(0, 1, 0, x) ]  |
+        // |                     |  row 3: [ p(1, 1, x) ]  |  row 3: [ p(0, 1, 1, x) ]  |
+        // |                     |                         |  row 4: [ p(1, 0, 0, x) ]  |
+        // |                     |                         |  row 5: [ p(1, 0, 1, x) ]  |
+        // |                     |                         |  row 6: [ p(1, 1, 0, x) ]  |
+        // |                     |                         |  row 7: [ p(1, 1, 1, x) ]  |
+        // +---------------------+-------------------------+----------------------------+
         //
         // and so on.
         let r_degree = prover_state.max_multiplicands;
@@ -176,7 +204,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // TODO: we might be allocating unncecessary memory for the last round (i.e., round t)
         let num_round_poly_evals = r_degree + 1;
         let mut pre_computed_array_with_eq: Vec<Vec<Vec<EF>>> = vec![vec![]; num_round_poly_evals];
-        let mut pre_computed_eq_1_left: Vec<Vec<Vec<EF>>> = vec![vec![]; num_round_poly_evals];
         for round_num in 1..=round_small_val {
             // *******************************************************************************
             // ----------------------------------------------
@@ -271,6 +298,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     eq_1_right_for_round.len() * eq_2_for_round.len() // 2^{n/2-i} * 2^{n/2} = 2^{n-i}
                 );
 
+                println!("eq1 right for round:");
+                println!("{:#?}", eq_1_right_for_round);
+                println!("eq2 for round:");
+                println!("{:#?}", eq_2_for_round);
+
                 // Now multiply the compressed witness matrix with eq2 evaluations
                 let mut compressed_witness_and_eq_2: Vec<Vec<EF>> = vec![
                         vec![EF::zero(); compressed_witness_for_k[0].len()];
@@ -285,6 +317,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                             mult_be(w_val, &eq_2_for_round[eq_2_idx]);
                     }
                 }
+
+                println!("compressed witness and eq2:");
+                print_collection(&compressed_witness_and_eq_2, |c| c.get_val());
 
                 // Now multiply the resulting matrix with the eq1 evaluations
                 let mut compressed_witness_eq_1_eq_2: Vec<EF> =
@@ -306,23 +341,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     1 << ((round_num - 1) * r_degree)
                 );
 
+                println!("compressed witness eq1 eq2:");
+                print_collection(&vec![compressed_witness_eq_1_eq_2.clone()], |c| c.get_val());
+
                 pre_computed_array_with_eq[k as usize].push(compressed_witness_eq_1_eq_2);
-
-                // Lets pre-compute the evaluations of eq1 left polynomial for this round
-                let eq_1_left_for_round = &eq_1_left_staged_evals[round_num - 1];
-                let one_minus_k_val = BF::one() - BF::new(k as u128, Some(2));
-                let k_val = BF::new(k as u128, Some(2));
-                let compressed_eq_1_left_for_round: Vec<EF> = eq_1_left_for_round
-                    .chunks(2)
-                    .map(|w| mult_be(&one_minus_k_val, &w[0]) + mult_be(&k_val, &w[1]))
-                    .collect();
-
-                println!("comp eq1 = {}", compressed_eq_1_left_for_round.len());
-
-                // Check if the resulting compressed eq1 left vector has the correct length
-                assert_eq!(compressed_eq_1_left_for_round.len(), 1 << (round_num - 1));
-
-                pre_computed_eq_1_left[k as usize].push(compressed_eq_1_left_for_round);
             }
         }
 
@@ -344,10 +366,12 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             // Compute the challenge term mixed with the left eq1 polynomial
 
-            // Compute round polynomial at k
+            // Compute round polynomial at k ∈ [0, 1, ..., d]
+            let mut intermediate_round_poly: Vec<EF> =
+                Vec::with_capacity(num_round_poly_evals as usize);
             for k in 0..num_round_poly_evals {
                 // Fetch the eq1 left evaluations for this round, and compute its inner product with the challenge matrix
-                let eq_1_left_evals = &pre_computed_eq_1_left[k][round_num - 1];
+                let eq_1_left_evals = &eq_1_left_staged_evals[round_num - 1];
                 assert_eq!(
                     eq_1_left_evals.len(),
                     challenge_matrix_polynomial.no_of_rows
@@ -361,6 +385,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     })
                     .fold(EF::zero(), |acc, val| acc + val);
 
+                println!("round_num = {} and k = {}", round_num, k);
+                println!("eq1 left and challenge value:");
+                println!("{:#?}", eq_1_left_and_challenge_value);
+
                 // Fetch the precomputed array for this round and k and compute the inner product with the gamma matrix
                 let precomputed_array_for_k = &pre_computed_array_with_eq[k][round_num - 1];
                 assert_eq!(precomputed_array_for_k.len(), gamma_matrix.no_of_rows);
@@ -373,16 +401,65 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     })
                     .fold(EF::zero(), |acc, val| acc + val);
 
+                println!("precomputed array and challenge value:");
+                println!("{:#?}", precomputed_array_and_challege_value);
+
+                // Compute the eq1 centre evaluation
+                let one_minus_k_val = BF::one() - BF::new(k as u128, Some(2));
+                let k_val = BF::new(k as u128, Some(2));
+                let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
+                let eq_challenge_value = eq_challenges[round_num - 1];
+                let eq_1_center_evaluation =
+                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
+                        + mult_be(&k_val, &eq_challenge_value);
+
+                println!("eq1 center evaluation:");
+                println!("{:#?}", eq_1_center_evaluation);
+
                 // The round polynomial value is simply the product of the:
-                // eq1 left value and the precomputed array value
-                round_polynomials[round_num - 1][k as usize] = mult_ee(
-                    &precomputed_array_and_challege_value,
+                // eq1 left value, eq 1 centre value and the precomputed array value
+                let intermediate_round_poly_evaluation = mult_ee(
                     &eq_1_left_and_challenge_value,
+                    &precomputed_array_and_challege_value,
                 );
+
+                round_polynomials[round_num - 1][k as usize] =
+                    mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
+
+                println!("intermediate round polynomial evaluation:");
+                println!("{:#?}", intermediate_round_poly_evaluation);
+                intermediate_round_poly.push(intermediate_round_poly_evaluation);
 
                 // Ensure Γ has only 1 column and Γ.
                 assert_eq!(gamma_matrix.no_of_columns, 1);
             }
+
+            // Now we need to compute the final evaluation of the round polynomial at k = (d + 1)
+            // To do that, we need to interpolate the intermediate round polynomial and compute
+            // its evaluation at k = (d + 1)
+            // Then we can simply compute the final round polynomial evaluation as
+            // eq1(w_i, k) * s'_i(d + 1)
+            //
+            let intermediate_round_poly_final_eval = barycentric_interpolation(
+                &intermediate_round_poly,
+                EF::new(num_round_poly_evals as u128, Some(2)),
+            );
+
+            // Compute the eq1 centre evaluation at k = (d + 1)
+            let final_k_val = BF::new(num_round_poly_evals as u128, Some(2));
+            let one_minus_final_k_val = BF::one() - final_k_val;
+            let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
+            let eq_challenge_value = eq_challenges[round_num - 1];
+            let eq_1_center_evaluation =
+                mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
+                    + mult_be(&final_k_val, &eq_challenge_value);
+
+            println!("final eq1 center evaluation:");
+            println!("{:#?}", eq_1_center_evaluation);
+
+            let final_round_poly_eval =
+                mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
+            round_polynomials[round_num - 1].push(final_round_poly_eval);
 
             // print round number and current round polynomial
             println!("Round number = {}", round_num);

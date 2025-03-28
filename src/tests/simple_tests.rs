@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod simple_extension_tests {
+    use crate::data_structures::print_collection;
     use crate::data_structures::LinearLagrangeList;
     use crate::eq_poly::EqPoly;
     use crate::prover::AlgorithmType;
@@ -503,7 +504,7 @@ mod simple_extension_tests {
         print_addition_table(15);
 
         // Take two simple polynomial
-        let num_variables = 4;
+        let num_variables = 6;
         let num_evaluations = (1 as u32) << num_variables;
         let evaluations_a: Vec<BF> = (0..num_evaluations)
             .map(|i| BF::from((2 * i) % 7))
@@ -528,7 +529,7 @@ mod simple_extension_tests {
 
         // Dummy eq challenges: [2, 3, ..., n+1]
         let dummy_eq_challenges: Vec<EF> = (0..num_variables)
-            .map(|i| EF::from((i + 2) as u64))
+            .map(|i| EF::from((i + 2) as u128))
             .collect();
 
         let mut prover_state: ProverState<EF, BF> =
@@ -544,7 +545,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            Some(2),
+            Some(3),
             Some(&dummy_eq_challenges),
             None,
             None,
@@ -554,7 +555,10 @@ mod simple_extension_tests {
 
         // We want to compare round polynomial using Algo3Eq and Naive algorithm
         let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
-        let fourth_poly = dumm_eq_poly.compute_evals();
+        let fourth_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
+
+        println!("Fourth Polynomial:");
+        print_collection(&vec![fourth_poly.clone()], |c: &BF| c.get_val());
 
         let mut new_polynomials = polynomials.clone();
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
