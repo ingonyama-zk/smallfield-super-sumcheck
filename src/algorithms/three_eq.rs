@@ -169,14 +169,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // +---------------------+-------------------------+----------------------------+
         //
         // and so on.
-        let r_degree = prover_state.max_multiplicands;
-        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
-
-        for i in 0..r_degree {
-            matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
-                &prover_state.state_polynomials[i],
-            ));
-        }
+        let mut matrix_polynomials = prover_state
+            .state_polynomials
+            .iter()
+            .map(|witness_poly| MatrixPolynomial::from_linear_lagrange_list(witness_poly))
+            .collect::<Vec<_>>();
 
         println!("round_t = {}", round_small_val);
 
@@ -200,16 +197,19 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Pre-compute the witness terms multiplied by the eq1 and eq2 evaluations
         // TODO: we might be allocating unncecessary memory for the last round (i.e., round t)
-        let num_round_poly_evals = r_degree + 1;
+        let r_degree = prover_state.max_multiplicands;
+        let num_witness_polys = prover_state.state_polynomials.len();
+        assert_eq!(r_degree, num_witness_polys + 1); // sumcheck_poly = eq * w_1 * ... * w_d
+
+        let num_round_poly_evals = num_witness_polys + 1;
         let mut pre_computed_array_with_eq: Vec<Vec<Vec<EF>>> = vec![vec![]; num_round_poly_evals];
         for round_num in 1..=round_small_val {
-            // *******************************************************************************
             // ----------------------------------------------
             // Extract the witness terms for this round
             // ----------------------------------------------
             let extracted_witness_for_round = MatrixPolynomial::extract_subtensors_from_tensors(
                 &precomputed_for_round_small_val,
-                r_degree,                           // degree d
+                num_witness_polys,                  // degree d
                 1 << (round_small_val - round_num), // 2^{t - i}
             );
 
@@ -225,13 +225,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             // Check if each vector in extracted witness terms has the correct length
             for witness in &extracted_witness_for_round {
-                assert_eq!(witness.len(), 1 << (round_num * r_degree)); // 2^{r * d}
+                assert_eq!(witness.len(), 1 << (round_num * num_witness_polys));
+                // 2^{r * d}
             }
-            // *******************************************************************************
 
             // Now lets compute the precomputed array for this round for each k
             // TODO: define evaluation point vector: [0, 2, 3, ...] because you can avoid computing for k = 1
-            for k in 0..(r_degree + 1) as u64 {
+            for k in 0..num_round_poly_evals as u64 {
                 // Compute scalar vector:
                 // For d = 1: [(1 - k), k]
                 // For d = 2: [(1 - k)²,  (1 - k)k,  k(1 - k), k²]
@@ -241,10 +241,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     BF::new(k as u128, Some(2)),
                 ]);
                 let mut k_matrix = scalar_tuple_matrix.clone();
-                for _ in 1..r_degree {
+                for _ in 1..num_witness_polys {
                     k_matrix = k_matrix.tensor_hadamard_product(&scalar_tuple_matrix, &mult_bb);
                 }
-                let two_pow_degree = (1 as usize) << r_degree;
+                let two_pow_degree = (1 as usize) << num_witness_polys;
                 assert_eq!(k_matrix.no_of_columns, 1);
                 assert_eq!(k_matrix.no_of_rows, two_pow_degree);
 
@@ -260,17 +260,17 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     Vec::with_capacity(extracted_witness_for_round.len());
 
                 for row in extracted_witness_for_round.iter() {
-                    let temp_num_cols = 1 << ((round_num - 1) * r_degree);
+                    let temp_num_cols = 1 << ((round_num - 1) * num_witness_polys);
                     let mut temp_row = Vec::with_capacity(temp_num_cols);
                     for idx in 0..temp_num_cols {
                         let mut scalar_accumulator = BF::zero();
                         for j in 0..two_pow_degree {
-                            let total_input_bit_len = r_degree * (round_num - 1);
+                            let total_input_bit_len = num_witness_polys * (round_num - 1);
                             let bit_extended_index = bit_extend_and_insert(
                                 idx,
                                 total_input_bit_len,
                                 j,
-                                r_degree,
+                                num_witness_polys,
                                 round_num - 1,
                                 round_num,
                             );
@@ -336,7 +336,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 // Check if the resulting compressed witness matrix has the correct length
                 assert_eq!(
                     compressed_witness_eq_1_eq_2.len(),
-                    1 << ((round_num - 1) * r_degree)
+                    1 << ((round_num - 1) * num_witness_polys)
                 );
 
                 println!("compressed witness eq1 eq2:");
@@ -355,11 +355,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut challenge_matrix_polynomial: MatrixPolynomial<EF> = MatrixPolynomial::one();
         let mut challenge_vector: Vec<EF> = Vec::with_capacity(round_small_val);
 
+        // Round computation starts here:
+        // The round polynomial is of the form:
+        //
+        // s_i(k) = eq1_left * eq1_center * ∑ ∑ ... ∑ round_challenge_terms * pre_computed_i(k)
+        //
+        // We will compute the equality terms first and then compute the inner sum for each k.
+        //
         let mut eq_1_left_cumulative = EF::one();
         for round_num in 1..=round_small_val {
             // Compute challenge terms for 2^{(r - 1) * d} terms
             let mut gamma_matrix = challenge_matrix_polynomial.clone();
-            for _ in 1..r_degree {
+            for _ in 1..num_witness_polys {
                 gamma_matrix =
                     gamma_matrix.tensor_hadamard_product(&challenge_matrix_polynomial, &mult_ee);
             }
@@ -380,11 +387,23 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
 
             // Compute round polynomial at k ∈ [0, 1, ..., d]
+            // The intermediate polynomial is s'_i(k) defined s.t.:
+            //
+            // s_i(k) = s'_i(k) * eq1_center.
+            //
+            // The degree of s'_i(k) is d (number of witness polynomials), so we can evaluate it at
+            // d + 1 points (i.e., 0, 1, ..., d) and thus compute s_i(k) at those points.
+            //
+            // But since the degree of s_i(c) is (d + 1), we need its evaluation at one more point (i.e., k = d + 1)
+            // To compute that, we interpolate the intermediate polynomial and compute its evaluation at k = d + 1
+            // and recover s_i(d + 1) as:
+            // s_i(d + 1) = s'_i(d + 1) * eq1_center(d + 1).
+            //
             let mut intermediate_round_poly: Vec<EF> =
                 Vec::with_capacity(num_round_poly_evals as usize);
             for k in 0..num_round_poly_evals {
                 //
-                // Round polynomial is of the form:
+                // As the round polynomial is of the form:
                 //
                 // s_i(k) = eq1_left * eq1_center * ∑ ∑ ... ∑ round_challenge_terms * pre_computed_i(k)
                 //
@@ -467,7 +486,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
-            round_polynomials[round_num - 1].push(final_round_poly_eval);
+            round_polynomials[round_num - 1][num_round_poly_evals] = final_round_poly_eval;
 
             // print round number and current round polynomial
             println!("Algo3: Round number = {}", round_num);
@@ -496,11 +515,14 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
         }
 
-        // TODO: see next steps in the paper
-
-        // We will now switch back to Algorithm 1: so we compute the arrays A_i such that
-        // A_i = [ p_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
-        // for each witness polynomial p_i.
+        // Okay so we've computed the first t rounds using the small-value trick (with eq polynomial).
+        // Next, we need to compute the next (n / 2 - t) rounds using just the eq trick.
+        // To do so, we update the witness polynomials to substitute the round challenges:
+        //
+        // A_i := w_i(α_1, α_2, ..., α_j, x) for all x ∈ {0, 1}^{l - j} ]
+        //
+        // for all witness polynomials (i.e., i ∈ {1, 2, ..., d})
+        //
         let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
             .iter()
             .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
@@ -622,7 +644,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
-            round_polynomials[round_num - 1].push(final_round_poly_eval);
+            round_polynomials[round_num - 1][num_round_poly_evals] = final_round_poly_eval;
 
             // print round number and current round polynomial
             println!("Algo3: Round number = {}", round_num);
@@ -679,12 +701,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Process remaining rounds by switching to Algorithm 1
         for round_num in ((prover_state.num_vars / 2) + 1)..=prover_state.num_vars {
-            round_polynomials[round_num - 1].push(EF::zero());
             let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
-                r_degree + 1,
+                r_degree,
                 &ef_combine_function,
                 transcript,
             );

@@ -55,6 +55,21 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             panic!("Cannot prove empty input polynomials.")
         }
 
+        // sanity check 2: degree is consistent with the number of polynomials.
+        if algorithm == AlgorithmType::PrecomputationWithEq {
+            assert_eq!(
+                sumcheck_poly_degree,
+                polynomials.len() + 1,
+                "Degree of the sumcheck polynomial does not match number of polynomials, maybe you did not consider the equality polynomial."
+            );
+        } else {
+            assert_eq!(
+                sumcheck_poly_degree,
+                polynomials.len(),
+                "Degree of the sumcheck polynomial does not match number of polynomials."
+            );
+        }
+
         // sanity check 2: all polynomial evaluations must be of the same size.
         let problem_size = polynomials[0].size;
         let _ = polynomials.iter().enumerate().map(|(i, poly)| {
@@ -112,16 +127,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
-        let max_mults = if prover_state.algo == AlgorithmType::PrecomputationWithEq {
-            prover_state.max_multiplicands + 1
-        } else {
-            prover_state.max_multiplicands
-        };
         // Initiate the transcript with the protocol name
         <Transcript as TFTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             prover_state.num_vars as u64,
-            max_mults as u64,
+            prover_state.max_multiplicands as u64,
         );
 
         // Declare r_polys and initialise it with 0s
@@ -212,15 +222,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
         }
 
-        let out_degree = if prover_state.algo == AlgorithmType::PrecomputationWithEq {
-            r_degree + 1
-        } else {
-            r_degree
-        };
-
         SumcheckProof {
             num_vars: prover_state.num_vars,
-            degree: out_degree,
+            degree: r_degree,
             round_polynomials: r_polys,
         }
     }

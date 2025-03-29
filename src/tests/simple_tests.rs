@@ -505,7 +505,7 @@ mod simple_extension_tests {
         print_addition_table(15);
 
         // Take two simple polynomial
-        let num_variables = 6;
+        let num_variables = 8;
         let num_evaluations = (1 as u32) << num_variables;
         let evaluations_a: Vec<BF> = (0..num_evaluations)
             .map(|i| BF::from((2 * i) % 7))
@@ -542,7 +542,7 @@ mod simple_extension_tests {
         print_collection(&vec![fourth_poly.clone()], |c: &BF| c.get_val());
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::PrecomputationWithEq);
+            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::PrecomputationWithEq);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
