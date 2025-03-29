@@ -409,14 +409,15 @@ mod simple_extension_tests {
     #[test]
     fn test_product_sumcheck_with_algorithm_3_eq() {
         // Define the combine function
+        // We need to combine 4 base field elements: 3 witness polynomials and 1 equality polynomial
         fn combine_fn_bf(data: &Vec<BF>) -> EF {
-            assert!(data.len() == 3);
-            to_ef(&(data[0] * data[1] * data[2]))
+            assert!(data.len() == 4);
+            to_ef(&(data[0] * data[1] * data[2] * data[3]))
         }
 
         fn combine_fn_ef(data: &Vec<EF>) -> EF {
-            assert!(data.len() == 3);
-            data[0] * data[1] * data[2]
+            assert!(data.len() == 4);
+            data[0] * data[1] * data[2] * data[3]
         }
 
         // Convert a base field element to an extension field element
@@ -545,7 +546,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            Some(3),
+            Some(2),
             Some(&dummy_eq_challenges),
             None,
             None,
@@ -565,24 +566,13 @@ mod simple_extension_tests {
 
         println!("New Polynomials: {:#?}", new_polynomials);
 
-        // Define the combine function
-        fn combine_fn_bf_4(data: &Vec<BF>) -> EF {
-            assert!(data.len() == 4);
-            to_ef(&(data[0] * data[1] * data[2] * data[3]))
-        }
-
-        fn combine_fn_ef_4(data: &Vec<EF>) -> EF {
-            assert!(data.len() == 4);
-            data[0] * data[1] * data[2] * data[3]
-        }
-
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
-            &combine_fn_ef_4,
-            &combine_fn_bf_4,
+            &combine_fn_ef,
+            &combine_fn_bf,
             &mut prover_transcript_dup,
             &to_ef,
             &mult_be,

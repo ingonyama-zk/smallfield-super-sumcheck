@@ -19,7 +19,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         round_polynomials: &mut Vec<Vec<EF>>,
         eq_challenges: &Vec<EF>,
         round_small_val: usize,
-        round_small_space: usize,
         mult_be: &BE,
         mult_ee: &EE,
         mult_bb: &BB,
@@ -31,10 +30,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EC: Fn(&Vec<EF>) -> EF + Sync,
     {
         // We apply small value sumcheck for first t rounds
-        // and we apply small space sumcheck for first l rounds
-        // We must ensure t < l <= n
-        assert!(round_small_val <= round_small_space);
-        assert!(round_small_space <= prover_state.num_vars);
+        // and we apply small space sumcheck for first (n / 2) rounds
+        // We must ensure t ≤ n/2
+        assert!(round_small_val <= prover_state.num_vars / 2);
 
         // Number of eq challenges must be equal to the number of rounds
         assert_eq!(eq_challenges.len(), prover_state.num_vars);
@@ -510,13 +508,187 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
             .collect();
 
+        // Process next rounds until the (n / 2)th round
+        for round_num in (round_small_val + 1)..=(prover_state.num_vars / 2) {
+            // Compute the current eq1 left and challenge value
+            // TODO: can use one ee_mult instead of two here!
+            let eq_challenge = eq_challenges[round_num - 2];
+            let one_minus_eq_challenge = EF::one() - eq_challenge;
+            let prev_round_challenge = challenge_vector.last().unwrap();
+            let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
+            let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
+                + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+            eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
+
+            let state_poly_size = ef_state_polynomials[0].list.len();
+            assert_eq!(state_poly_size, 1 << (prover_state.num_vars - round_num));
+
+            let mut intermediate_round_poly: Vec<EF> =
+                Vec::with_capacity(num_round_poly_evals as usize);
+
+            for k in 0..num_round_poly_evals {
+                // Compute the eq1 centre evaluation
+                // TODO: can use one be_mult instead of two here!
+                let k_val = BF::new(k as u128, Some(3));
+                let one_minus_k_val = BF::one() - k_val;
+                let eq_challenge_value = eq_challenges[round_num - 1];
+                let one_minus_eq_challenge_value = EF::one() - eq_challenge_value;
+                let eq_1_center_evaluation =
+                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
+                        + mult_be(&k_val, &eq_challenge_value);
+
+                // Evaluation points
+                let k_val = EF::new(k as u128, None);
+                let one_minus_k_val = EF::one() - k_val;
+
+                // Compute the witness products
+                let mut witness_products = vec![EF::one(); state_poly_size];
+                for poly in &ef_state_polynomials {
+                    for (i, witness) in poly.list.iter().enumerate() {
+                        witness_products[i] = mult_ee(
+                            &witness_products[i],
+                            &(one_minus_k_val * witness.even + k_val * witness.odd),
+                        );
+                    }
+                }
+
+                // Now merge the witness products with the eq1 right and eq2 evaluations
+                // Fetch the equality polynomials for this round
+                let eq_1_right_for_round = &eq_1_right_staged_evals[round_num - 1];
+                let eq_2_for_round = &eq_2_evals;
+                assert_eq!(
+                    witness_products.len(),                            // 2^{n - i}
+                    eq_1_right_for_round.len() * eq_2_for_round.len() // 2^{n/2-i} * 2^{n/2} = 2^{n-i}
+                );
+
+                println!("eq1 right for round:");
+                println!("{:#?}", eq_1_right_for_round);
+                println!("eq2 for round:");
+                println!("{:#?}", eq_2_for_round);
+
+                // Now multiply the witness products with eq2 evaluations
+                let mut witness_prod_and_eq_2: Vec<EF> =
+                    vec![EF::zero(); eq_1_right_for_round.len()];
+
+                for (w_idx, witness_prod) in witness_products.iter().enumerate() {
+                    let eq_2_idx = w_idx % eq_2_for_round.len();
+                    let eq_1_right_idx = w_idx / eq_2_for_round.len();
+                    witness_prod_and_eq_2[eq_1_right_idx] +=
+                        mult_ee(witness_prod, &eq_2_for_round[eq_2_idx]);
+                }
+
+                println!("witness prod and eq2:");
+                print_collection(&vec![witness_prod_and_eq_2.clone()], |c: &EF| c.get_val());
+
+                // Now multiply the resulting vec with the eq1 evaluations
+                let witness_prod_eq_1_eq_2: EF = witness_prod_and_eq_2
+                    .iter()
+                    .zip(eq_1_right_for_round.iter())
+                    .map(|(witness_and_eq2_term, eq_1_right_term)| {
+                        mult_ee(witness_and_eq2_term, eq_1_right_term)
+                    })
+                    .fold(EF::zero(), |acc, val| acc + val);
+
+                // Push the intermediate round polynomial evaluation
+                let intermediate_round_poly_evaluation =
+                    mult_ee(&eq_1_left_cumulative, &witness_prod_eq_1_eq_2);
+                intermediate_round_poly.push(intermediate_round_poly_evaluation);
+
+                // Compute the round polynomial evaluation
+                round_polynomials[round_num - 1][k as usize] =
+                    mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
+            }
+
+            // Now we need to compute the final evaluation of the round polynomial at k = (d + 1)
+            // To do that, we need to interpolate the intermediate round polynomial and compute
+            // its evaluation at k = (d + 1)
+            // Then we can simply compute the final round polynomial evaluation as
+            // eq1(w_i, k) * s'_i(d + 1)
+            //
+            let intermediate_round_poly_final_eval = barycentric_interpolation(
+                &intermediate_round_poly,
+                EF::new(num_round_poly_evals as u128, Some(2)),
+            );
+
+            // Compute the eq1 centre evaluation at k = (d + 1)
+            let final_k_val = BF::new(num_round_poly_evals as u128, Some(2));
+            let one_minus_final_k_val = BF::one() - final_k_val;
+            let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
+            let eq_challenge_value = eq_challenges[round_num - 1];
+            let eq_1_center_evaluation =
+                mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
+                    + mult_be(&final_k_val, &eq_challenge_value);
+
+            println!("final eq1 center evaluation:");
+            println!("{:#?}", eq_1_center_evaluation);
+
+            let final_round_poly_eval =
+                mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
+            round_polynomials[round_num - 1].push(final_round_poly_eval);
+
+            // print round number and current round polynomial
+            println!("Algo3: Round number = {}", round_num);
+            println!("round polynomial: {:#?}", round_polynomials[round_num - 1]);
+
+            // append the round polynomial (i.e. prover message) to the transcript
+            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
+                transcript,
+                b"r_poly",
+                &round_polynomials[round_num - 1],
+            );
+
+            // generate challenge α_i = H( transcript );
+            let mut alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
+                transcript,
+                b"challenge_nextround",
+            );
+
+            alpha = EF::new(13, Some(4)) * EF::new(round_num as u128, Some(4));
+
+            // Store the challenge in the challenge vector
+            challenge_vector.push(alpha);
+
+            // update the state polynomials
+            for j in 0..ef_state_polynomials.len() {
+                ef_state_polynomials[j].fold_in_half(alpha);
+            }
+        }
+
+        // Before we process the last (n / 2) rounds using the naive algorithm, we need to update
+        // the equality polynomial. Let's first update the eq1 cumulative value using the latest challenge.
+        let eq_challenge = eq_challenges[prover_state.num_vars / 2 - 1];
+        let one_minus_eq_challenge = EF::one() - eq_challenge;
+        let prev_round_challenge = challenge_vector.last().unwrap();
+        let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
+        let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
+            + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+        eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
+
+        // Now lets update the eq2 polynomial by multiplying it with the eq1 cumulative value
+        let mut eq_2_for_final_rounds = eq_2_evals.clone();
+        for i in 0..eq_2_evals.len() {
+            eq_2_for_final_rounds[i] = mult_ee(&eq_1_left_cumulative, &eq_2_for_final_rounds[i]);
+        }
+
+        // Add this eq2 polynomial to the state polynomials
+        ef_state_polynomials.push(LinearLagrangeList::from_vector(&eq_2_for_final_rounds));
+
+        // Check if all state polynomials have the same size
+        for i in 0..ef_state_polynomials.len() {
+            assert_eq!(
+                ef_state_polynomials[i].list.len(),
+                1 << (prover_state.num_vars / 2 - 1)
+            );
+        }
+
         // Process remaining rounds by switching to Algorithm 1
-        for round_num in (round_small_val + 1)..=prover_state.num_vars {
+        for round_num in ((prover_state.num_vars / 2) + 1)..=prover_state.num_vars {
+            round_polynomials[round_num - 1].push(EF::zero());
             let alpha = Self::compute_round_polynomial::<EC, EF>(
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
-                r_degree,
+                r_degree + 1,
                 &ef_combine_function,
                 transcript,
             );

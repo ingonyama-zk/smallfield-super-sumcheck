@@ -96,7 +96,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         add_ee: &AEE,
         mult_ee: &EE,
         mult_bb: &BB,
-        round_t: Option<usize>,
+        round_small_val: Option<usize>,
         eq_challenges: Option<&Vec<EF>>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
@@ -131,7 +131,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         }
 
         // Extract threshold round
-        let round_threshold = match round_t {
+        let num_round_small_val = match round_small_val {
             Some(t_value) => {
                 if (prover_state.algo == AlgorithmType::Precomputation)
                     || (prover_state.algo == AlgorithmType::ToomCook)
@@ -171,7 +171,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     prover_state,
                     transcript,
                     &mut r_polys,
-                    round_threshold,
+                    num_round_small_val,
                     mult_be,
                     mult_ee,
                     mult_bb,
@@ -182,7 +182,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 prover_state,
                 transcript,
                 &mut r_polys,
-                round_threshold,
+                num_round_small_val,
                 mult_be,
                 mult_ee,
                 mult_bb,
@@ -198,8 +198,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     transcript,
                     &mut r_polys,
                     &eq_challenges.unwrap(),
-                    round_threshold,
-                    round_threshold,
+                    num_round_small_val,
                     mult_be,
                     mult_ee,
                     mult_bb,
@@ -208,9 +207,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
         }
 
+        let out_degree = if prover_state.algo == AlgorithmType::PrecomputationWithEq {
+            r_degree + 1
+        } else {
+            r_degree
+        };
+
         SumcheckProof {
             num_vars: prover_state.num_vars,
-            degree: r_degree,
+            degree: out_degree,
             round_polynomials: r_polys,
         }
     }
