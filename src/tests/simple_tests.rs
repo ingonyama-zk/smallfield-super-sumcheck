@@ -525,13 +525,11 @@ mod simple_extension_tests {
 
         println!("Polynomials: {:#?}", polynomials);
 
-        // Dummy eq challenges: [2, 3, ..., n+1]
-        let dummy_eq_challenges: Vec<EF> = (0..num_variables)
-            .map(|i| EF::from((i + 2) as u128))
-            .collect();
+        // Generate random eq challenges (in a SNARK setting, this would be provided by the verifier)
+        let eq_challenges = EF::rand_vector(num_variables, Some(3));
 
         // We want to compare round polynomial using Algo3Eq and Naive algorithm
-        let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
+        let dumm_eq_poly = EqPoly::new(eq_challenges.clone());
         let fourth_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
 
         let claimed_sum = (0..(num_evaluations as usize))
@@ -554,8 +552,8 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            Some(2),
-            Some(&dummy_eq_challenges),
+            Some(3),
+            Some(&eq_challenges),
             None,
             None,
             None,
