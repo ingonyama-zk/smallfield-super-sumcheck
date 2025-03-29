@@ -481,12 +481,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             );
 
             // generate challenge α_i = H( transcript );
-            let mut alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
-
-            alpha = EF::new(13, Some(4)) * EF::new(round_num as u128, Some(4));
 
             // Store the challenge in the challenge vector
             challenge_vector.push(alpha);
@@ -638,12 +636,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             );
 
             // generate challenge α_i = H( transcript );
-            let mut alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
+            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
             );
-
-            alpha = EF::new(13, Some(4)) * EF::new(round_num as u128, Some(4));
 
             // Store the challenge in the challenge vector
             challenge_vector.push(alpha);

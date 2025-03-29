@@ -516,9 +516,6 @@ mod simple_extension_tests {
         let evaluations_c: Vec<BF> = (0..num_evaluations)
             .map(|i| BF::from((i + 2) % 7))
             .collect();
-        let claimed_sum = (0..num_evaluations)
-            .map(|i| BF::from((2 * i) % 7) * BF::from((i + 1) % 7) * BF::from((i + 2) % 7))
-            .fold(BF::zero(), |acc, val| acc + val);
 
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
             LinearLagrangeList::<BF>::from_vector(&evaluations_a),
@@ -532,6 +529,17 @@ mod simple_extension_tests {
         let dummy_eq_challenges: Vec<EF> = (0..num_variables)
             .map(|i| EF::from((i + 2) as u128))
             .collect();
+
+        // We want to compare round polynomial using Algo3Eq and Naive algorithm
+        let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
+        let fourth_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
+
+        let claimed_sum = (0..(num_evaluations as usize))
+            .map(|i| evaluations_a[i] * evaluations_b[i] * evaluations_c[i] * fourth_poly[i])
+            .fold(EF::zero(), |acc, val| acc + val);
+
+        println!("Fourth Polynomial:");
+        print_collection(&vec![fourth_poly.clone()], |c: &BF| c.get_val());
 
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::PrecomputationWithEq);
@@ -553,13 +561,6 @@ mod simple_extension_tests {
             None,
             None,
         );
-
-        // We want to compare round polynomial using Algo3Eq and Naive algorithm
-        let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
-        let fourth_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
-
-        println!("Fourth Polynomial:");
-        print_collection(&vec![fourth_poly.clone()], |c: &BF| c.get_val());
 
         let mut new_polynomials = polynomials.clone();
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));

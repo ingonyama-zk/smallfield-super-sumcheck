@@ -112,11 +112,16 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
+        let max_mults = if prover_state.algo == AlgorithmType::PrecomputationWithEq {
+            prover_state.max_multiplicands + 1
+        } else {
+            prover_state.max_multiplicands
+        };
         // Initiate the transcript with the protocol name
         <Transcript as TFTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             prover_state.num_vars as u64,
-            prover_state.max_multiplicands as u64,
+            max_mults as u64,
         );
 
         // Declare r_polys and initialise it with 0s
