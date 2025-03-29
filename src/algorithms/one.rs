@@ -57,17 +57,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
         }
 
-        // print round number and current round polynomial
-        println!("Algo1: Round number = {}", round_number);
-        println!(
-            "round polynomial: {:#?}",
-            round_polynomials[round_number - 1]
-        );
-        println!(
-            "round polynomial length: {}",
-            round_polynomials[round_number - 1].len()
-        );
-
         // append the round polynomial (i.e. prover message) to the transcript
         <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,

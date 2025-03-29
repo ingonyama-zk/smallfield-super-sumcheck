@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod simple_extension_tests {
-    use crate::data_structures::print_collection;
     use crate::data_structures::LinearLagrangeList;
     use crate::eq_poly::EqPoly;
     use crate::prover::AlgorithmType;
@@ -445,65 +444,6 @@ mod simple_extension_tests {
             bb_element1 * bb_element2
         }
 
-        // I want to print multiplication matrix for debugging
-        // Print a matrix of multiplication of basic numbers
-        // Say we have 4 numbers: 1, 2, 3, 4
-        // The matrix will be:
-        // ┌         ┐
-        // │ 1 2 3 4 │
-        // │ 2 4 6 8 │
-        // │ 3 6 9 12│
-        // │ 4 8 12 16│
-        // └         ┘
-        fn print_multiplication_table(n: usize) {
-            // Generate numbers from 0 to n
-            let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
-
-            // Print the header row
-            print!("    ");
-            for &num in &numbers {
-                print!(" {:3}   ", num);
-            }
-            println!();
-            println!("   ----------------------------------------");
-
-            // Print the multiplication table
-            for &i in &numbers {
-                print!("{:3} | ", i);
-                for &j in &numbers {
-                    print!("{:3}  ", (i * j).get_val());
-                }
-                println!();
-            }
-            println!("   ----------------------------------------");
-        }
-        fn print_addition_table(n: usize) {
-            // Generate numbers from 0 to n
-            let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
-
-            // Print the header row
-            print!("    ");
-            for &num in &numbers {
-                print!(" {:3}   ", num);
-            }
-            println!();
-            println!("   ----------------------------------------");
-
-            // Print the multiplication table
-            for &i in &numbers {
-                print!("{:3} | ", i);
-                for &j in &numbers {
-                    print!("{:3}  ", (i + j).get_val());
-                }
-                println!();
-            }
-            println!("   ----------------------------------------");
-        }
-        println!("MULT:");
-        print_multiplication_table(15);
-        println!("ADD:");
-        print_addition_table(15);
-
         // Take two simple polynomial
         let num_variables = 8;
         let num_evaluations = (1 as u32) << num_variables;
@@ -523,8 +463,6 @@ mod simple_extension_tests {
             LinearLagrangeList::<BF>::from_vector(&evaluations_c),
         ];
 
-        println!("Polynomials: {:#?}", polynomials);
-
         // Generate random eq challenges (in a SNARK setting, this would be provided by the verifier)
         let eq_challenges = EF::rand_vector(num_variables, Some(3));
 
@@ -535,9 +473,6 @@ mod simple_extension_tests {
         let claimed_sum = (0..(num_evaluations as usize))
             .map(|i| evaluations_a[i] * evaluations_b[i] * evaluations_c[i] * fourth_poly[i])
             .fold(EF::zero(), |acc, val| acc + val);
-
-        println!("Fourth Polynomial:");
-        print_collection(&vec![fourth_poly.clone()], |c: &BF| c.get_val());
 
         let mut prover_state: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::PrecomputationWithEq);
@@ -562,8 +497,6 @@ mod simple_extension_tests {
 
         let mut new_polynomials = polynomials.clone();
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
-
-        println!("New Polynomials: {:#?}", new_polynomials);
 
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);

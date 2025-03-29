@@ -2,9 +2,7 @@ use ark_std::log2;
 use merlin::Transcript;
 
 use crate::btf_transcript::TFTranscriptProtocol;
-use crate::data_structures::{
-    bit_extend_and_insert, print_collection, LinearLagrangeList, MatrixPolynomial,
-};
+use crate::data_structures::{bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial};
 use crate::eq_poly::EqPoly;
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
@@ -36,9 +34,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Number of eq challenges must be equal to the number of rounds
         assert_eq!(eq_challenges.len(), prover_state.num_vars);
-
-        println!("witness poly: {:#?}", prover_state.state_polynomials);
-        println!("eq challenges: {:#?}", eq_challenges);
 
         // First, lets compute the challenge pre-computation terms
         //
@@ -87,9 +82,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut eq_1_right_basis = eq_1_basis[1..].to_vec();
         eq_1_right_basis.reverse();
 
-        println!("eq1 left basis: {:#?}", eq_1_left_basis);
-        println!("eq1 right basis: {:#?}", eq_1_right_basis);
-
         let eq_1_left_poly = EqPoly::new(eq_1_left_basis);
         let mut eq_1_left_staged_evals = eq_1_left_poly.compute_staged_evals(false);
         eq_1_left_staged_evals.insert(0, vec![EF::one()]);
@@ -98,18 +90,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut eq_1_right_staged_evals = eq_1_right_poly.compute_staged_evals(true);
         eq_1_right_staged_evals.reverse();
         eq_1_right_staged_evals.push(vec![EF::one()]);
-
-        println!("Round 1:");
-        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[0]);
-        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[0]);
-
-        println!("Round 2:");
-        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[1]);
-        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[1]);
-
-        println!("Round 3:");
-        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[2]);
-        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[2]);
 
         // Second equality polynomial is of the form: [ α_{n/2 + 1}, α_{n/2 + 2}, ..., α_n ]
         //
@@ -136,11 +116,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Note that second eq polynomial is constant in first n/2 rounds.
         //
         let eq_2_basis = eq_2_basis.to_vec();
-        println!("eq2 basis: {:#?}", eq_2_basis);
         let eq_2_poly = EqPoly::new(eq_2_basis);
         let eq_2_evals = eq_2_poly.compute_evals(false);
-
-        println!("eq2 evals: {:#?}", eq_2_evals);
 
         // Assert that the number of evaluations is correct
         assert_eq!(eq_1_left_staged_evals.len(), eq_1_right_staged_evals.len());
@@ -175,25 +152,16 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .map(|witness_poly| MatrixPolynomial::from_linear_lagrange_list(witness_poly))
             .collect::<Vec<_>>();
 
-        println!("round_t = {}", round_small_val);
-
         // For this, we first fold the witness matrices to get their dimension: 2^t  x  (N / 2^t)
         for i in 2..=round_small_val {
-            println!("i = {}", i);
-            println!("matrix polynomials: {:#?}", matrix_polynomials);
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
         }
 
-        println!("matrix polynomials: {:#?}", matrix_polynomials);
-
         // Pre-compute bb multiplications upto round t
         let precomputed_for_round_small_val =
             MatrixPolynomial::tensor_column_products(&matrix_polynomials, mult_bb);
-
-        println!("precomputed for round t:");
-        print_collection(&precomputed_for_round_small_val, |col| col.get_val());
 
         // Pre-compute the witness terms multiplied by the eq1 and eq2 evaluations
         // TODO: we might be allocating unncecessary memory for the last round (i.e., round t)
@@ -212,10 +180,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 num_witness_polys,                  // degree d
                 1 << (round_small_val - round_num), // 2^{t - i}
             );
-
-            println!("\n--------\nround_num = {}", round_num);
-            println!("extracted witness for round:");
-            print_collection(&extracted_witness_for_round, |col| col.get_val());
 
             // Check if the number of extracted witness terms is correct
             assert_eq!(
@@ -247,11 +211,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 let two_pow_degree = (1 as usize) << num_witness_polys;
                 assert_eq!(k_matrix.no_of_columns, 1);
                 assert_eq!(k_matrix.no_of_rows, two_pow_degree);
-
-                println!("\n----\nk = {}", k);
-
-                println!("k_matrix:");
-                print_collection(&k_matrix.evaluation_rows, |c| c.get_val());
 
                 // Define a temporary data structure to store the compressed witness terms
                 // This would be a matrix of size: W x 2^{(r - 1) * d}
@@ -285,9 +244,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 // Now lets squash the compressed witness matrix rows to get a single row
                 // We do so by multiplying the compressed witness matrix with the eq1 and eq2 evaluations
                 // Lets start by some assertions on the sizes
-                println!("compressed witness for k:");
-                print_collection(&compressed_witness_for_k, |c| c.get_val());
-
                 // Fetch the equality polynomials for this round
                 let eq_1_right_for_round = &eq_1_right_staged_evals[round_num - 1];
                 let eq_2_for_round = &eq_2_evals;
@@ -295,11 +251,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     compressed_witness_for_k.len(),                    // 2^{n - i}
                     eq_1_right_for_round.len() * eq_2_for_round.len() // 2^{n/2-i} * 2^{n/2} = 2^{n-i}
                 );
-
-                println!("eq1 right for round:");
-                println!("{:#?}", eq_1_right_for_round);
-                println!("eq2 for round:");
-                println!("{:#?}", eq_2_for_round);
 
                 // Now multiply the compressed witness matrix with eq2 evaluations
                 let mut compressed_witness_and_eq_2: Vec<Vec<EF>> = vec![
@@ -315,9 +266,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                             mult_be(w_val, &eq_2_for_round[eq_2_idx]);
                     }
                 }
-
-                println!("compressed witness and eq2:");
-                print_collection(&compressed_witness_and_eq_2, |c| c.get_val());
 
                 // Now multiply the resulting matrix with the eq1 evaluations
                 let mut compressed_witness_eq_1_eq_2: Vec<EF> =
@@ -338,9 +286,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     compressed_witness_eq_1_eq_2.len(),
                     1 << ((round_num - 1) * num_witness_polys)
                 );
-
-                println!("compressed witness eq1 eq2:");
-                print_collection(&vec![compressed_witness_eq_1_eq_2.clone()], |c| c.get_val());
 
                 pre_computed_array_with_eq[k as usize].push(compressed_witness_eq_1_eq_2);
             }
@@ -382,8 +327,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
                     + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
                 eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
-                println!("eq1 left cumulative:");
-                println!("{:#?}", eq_1_left_cumulative);
             }
 
             // Compute round polynomial at k ∈ [0, 1, ..., d]
@@ -427,9 +370,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
                         + mult_be(&k_val, &eq_challenge_value);
 
-                println!("eq1 center evaluation:");
-                println!("{:#?}", eq_1_center_evaluation);
-
                 // Fetch the precomputed array for this round and k and compute the inner product with the gamma matrix
                 let precomputed_array_for_k = &pre_computed_array_with_eq[k][round_num - 1];
                 assert_eq!(precomputed_array_for_k.len(), gamma_matrix.no_of_rows);
@@ -442,9 +382,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     })
                     .fold(EF::zero(), |acc, val| acc + val);
 
-                println!("precomputed array and challenge value:");
-                println!("{:#?}", precomputed_array_and_challege_value);
-
                 // The round polynomial value is simply the product of the:
                 // eq1 left value, eq 1 centre value and the precomputed array value
                 let intermediate_round_poly_evaluation =
@@ -453,8 +390,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 round_polynomials[round_num - 1][k as usize] =
                     mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
 
-                println!("intermediate round polynomial evaluation:");
-                println!("{:#?}", intermediate_round_poly_evaluation);
                 intermediate_round_poly.push(intermediate_round_poly_evaluation);
 
                 // Ensure Γ has only 1 column and Γ.
@@ -481,16 +416,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
                     + mult_be(&final_k_val, &eq_challenge_value);
 
-            println!("final eq1 center evaluation:");
-            println!("{:#?}", eq_1_center_evaluation);
-
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
             round_polynomials[round_num - 1][num_round_poly_evals] = final_round_poly_eval;
-
-            // print round number and current round polynomial
-            println!("Algo3: Round number = {}", round_num);
-            println!("round polynomial: {:#?}", round_polynomials[round_num - 1]);
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
@@ -581,11 +509,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     eq_1_right_for_round.len() * eq_2_for_round.len() // 2^{n/2-i} * 2^{n/2} = 2^{n-i}
                 );
 
-                println!("eq1 right for round:");
-                println!("{:#?}", eq_1_right_for_round);
-                println!("eq2 for round:");
-                println!("{:#?}", eq_2_for_round);
-
                 // Now multiply the witness products with eq2 evaluations
                 let mut witness_prod_and_eq_2: Vec<EF> =
                     vec![EF::zero(); eq_1_right_for_round.len()];
@@ -596,9 +519,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     witness_prod_and_eq_2[eq_1_right_idx] +=
                         mult_ee(witness_prod, &eq_2_for_round[eq_2_idx]);
                 }
-
-                println!("witness prod and eq2:");
-                print_collection(&vec![witness_prod_and_eq_2.clone()], |c: &EF| c.get_val());
 
                 // Now multiply the resulting vec with the eq1 evaluations
                 let witness_prod_eq_1_eq_2: EF = witness_prod_and_eq_2
@@ -639,16 +559,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
                     + mult_be(&final_k_val, &eq_challenge_value);
 
-            println!("final eq1 center evaluation:");
-            println!("{:#?}", eq_1_center_evaluation);
-
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
             round_polynomials[round_num - 1][num_round_poly_evals] = final_round_poly_eval;
-
-            // print round number and current round polynomial
-            println!("Algo3: Round number = {}", round_num);
-            println!("round polynomial: {:#?}", round_polynomials[round_num - 1]);
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(

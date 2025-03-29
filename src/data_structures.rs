@@ -823,8 +823,6 @@ where
                 let columns: Vec<Vec<F>> =
                     matrices.iter().map(|matrix| matrix.get_column(i)).collect();
 
-                print_collection(&columns, |col| col.get_val());
-
                 // Compute the tensor product of the columns
                 columns
                     .into_iter()
