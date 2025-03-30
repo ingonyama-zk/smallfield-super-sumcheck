@@ -153,7 +153,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .collect::<Vec<_>>();
 
         // For this, we first fold the witness matrices to get their dimension: 2^t  x  (N / 2^t)
-        for i in 2..=round_small_val {
+        for _ in 2..=round_small_val {
             for matrix in &mut matrix_polynomials {
                 matrix.heighten();
             }
@@ -608,7 +608,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         for i in 0..ef_state_polynomials.len() {
             assert_eq!(
                 ef_state_polynomials[i].list.len(),
-                1 << (prover_state.num_vars / 2 - 1)
+                1 << (prover_state.num_vars - prover_state.num_vars / 2 - 1)
             );
         }
 

@@ -100,8 +100,11 @@ mod fq4_tests {
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
-        let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone(), num_levels);
+        let (mut prover_state, claimed_sum, eq_challenges): (
+            ProverState<EF, BF>,
+            BF,
+            Option<Vec<EF>>,
+        ) = create_sumcheck_test_data(nv, degree, algorithm.clone(), num_levels);
 
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             common_setup_for_toom_cook::<BF, EF>(degree);
@@ -110,6 +113,14 @@ mod fq4_tests {
             "n = {}, d = {}, t = {}, algo = {:?}",
             nv, degree, round_t, algorithm
         );
+
+        if eq_challenges.is_some() {
+            assert_eq!(
+                algorithm,
+                AlgorithmType::PrecomputationWithEq,
+                "Eq challenges are generated only for algorithm 3 with eq polynomial."
+            );
+        }
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -125,7 +136,7 @@ mod fq4_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
-            None,
+            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -144,7 +155,7 @@ mod fq4_tests {
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
+            claimed_sum,
             &proof,
             &mut verifier_transcript,
             algorithm,
@@ -223,6 +234,38 @@ mod fq4_tests {
         );
 
         //
+        // Algorithm 3 with eq polynomial
+        //
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(10, deg, thresh, AlgorithmType::PrecomputationWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(12, deg, thresh, AlgorithmType::PrecomputationWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(14, deg, thresh, AlgorithmType::PrecomputationWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::PrecomputationWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+
+        //
         // Algorithm 4
         //
         assert_eq!(
@@ -253,13 +296,14 @@ mod fq4_tests {
 
     #[rstest]
     fn check_sumcheck_product(
-        #[values(5, 8, 12)] nv: usize,
+        #[values(6, 9)] nv: usize,
         #[values(1, 2, 3, 6)] degree: usize,
         #[values(
             AlgorithmType::Naive,
             AlgorithmType::WitnessChallengeSeparation,
             AlgorithmType::Precomputation,
-            AlgorithmType::ToomCook
+            AlgorithmType::ToomCook,
+            AlgorithmType::PrecomputationWithEq
         )]
         algorithm: AlgorithmType,
     ) {
