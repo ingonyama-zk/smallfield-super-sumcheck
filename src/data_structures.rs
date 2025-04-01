@@ -598,6 +598,25 @@ where
         }
     }
 
+    pub fn from_u32(input_vec: &Vec<Vec<u32>>, num_levels: Option<usize>) -> Self {
+        // Convert u32 to F
+        let n = input_vec.len();
+        let c = input_vec[0].len();
+        let mut eval_rows = Vec::with_capacity(n);
+        for u32_row in input_vec.iter() {
+            let f_row: Vec<F> = u32_row
+                .iter()
+                .map(|&u| F::new(u as u128, num_levels))
+                .collect();
+            eval_rows.push(f_row);
+        }
+        MatrixPolynomial {
+            no_of_rows: n,
+            no_of_columns: c,
+            evaluation_rows: eval_rows,
+        }
+    }
+
     pub fn get_column(&self, column_index: usize) -> Vec<F> {
         let mut column = Vec::with_capacity(self.no_of_rows);
         for i in 0..self.no_of_rows {
@@ -931,6 +950,40 @@ where
             }
         }
         subtensors
+    }
+
+    pub fn extract_submatrix(
+        &mut self,
+        chunk_size: usize,
+        indices_to_include_in_chunk: &Vec<usize>,
+    ) {
+        // Sanity checks
+        assert!(chunk_size < self.no_of_rows);
+        assert!(self.no_of_rows % chunk_size == 0);
+        assert!(indices_to_include_in_chunk.len() <= chunk_size);
+        for index in indices_to_include_in_chunk.iter() {
+            assert!(*index < chunk_size);
+        }
+
+        // Given a vector: [a1, a2, ..., ad, b1, b2, ..., bd, c1, c2, ..., cd, ...]
+        // We want to create a new vector: [aj, ak, bj, bk, cj, ck, ...]
+        // where j and k are the indices in indices_to_include_in_chunk.
+        for chunk_index in 0..(self.no_of_rows / chunk_size) {
+            // Create a new vector for the current chunk
+            let mut new_row_for_chunk: Vec<F> =
+                Vec::with_capacity(indices_to_include_in_chunk.len() * self.no_of_columns);
+            for i in indices_to_include_in_chunk.iter() {
+                new_row_for_chunk.extend_from_slice(&self.evaluation_rows[chunk_index + i]);
+            }
+
+            // Replace the old chunk with the new one
+            self.evaluation_rows[chunk_index] = new_row_for_chunk;
+
+            // Remove the other rows in the chunk
+            for _ in 1..chunk_size {
+                self.evaluation_rows.remove(chunk_index + 1);
+            }
+        }
     }
 
     pub fn dot_product<OtherF, P>(
@@ -1642,6 +1695,46 @@ mod test {
         let combined_output_3_from_output_3 =
             MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 1);
         assert_eq!(combined_output_3_from_output_3, output_3);
+    }
+
+    #[test]
+    fn test_extract_submatrix() {
+        // Define a struct instance with initial rows (6x4 matrix)
+        let example_matrix: Vec<Vec<u32>> = vec![
+            vec![1, 2, 3, 4, 5],      // a1
+            vec![6, 7, 8, 9, 10],     // a2
+            vec![11, 12, 13, 14, 15], // a3
+            vec![16, 17, 18, 19, 20], // b1
+            vec![21, 22, 23, 24, 25], // b2
+            vec![26, 27, 28, 29, 30], // b3
+            vec![31, 32, 33, 34, 35], // c1
+            vec![36, 37, 38, 39, 40], // c2
+            vec![41, 42, 43, 44, 45], // c3
+        ];
+
+        let mut matrix = MatrixPolynomial::<BiniusTowerField>::from_u32(&example_matrix, Some(5));
+
+        // Define chunk size and indices to extract
+        let chunk_size = 3;
+        let indices_to_include_in_chunk = vec![1, 2]; // Extract 2nd and 3rd row from each chunk
+
+        // Call the function
+        matrix.extract_submatrix(chunk_size, &indices_to_include_in_chunk);
+
+        // Expected output:
+        // - From (a1, a2, a3), we keep (a2, a3)
+        // - From (b1, b2, b3), we keep (b2, b3)
+        // - From (c1, c2, c3), we keep (c2, c3)
+        let expected = vec![
+            vec![6, 7, 8, 9, 10, 11, 12, 13, 14, 15],     // (a2 || a3)
+            vec![21, 22, 23, 24, 25, 26, 27, 28, 29, 30], // (b2 || b3)
+            vec![36, 37, 38, 39, 40, 41, 42, 43, 44, 45], // (c2 || c3)
+        ];
+
+        assert_eq!(
+            matrix.evaluation_rows,
+            MatrixPolynomial::<BiniusTowerField>::from_u32(&expected, Some(5)).evaluation_rows
+        );
     }
 
     #[test]
