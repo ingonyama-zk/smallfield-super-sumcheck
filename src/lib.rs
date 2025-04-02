@@ -10,6 +10,7 @@ pub mod verifier;
 
 pub mod algorithms {
     pub mod four;
+    pub mod four_eq;
     pub mod one;
     pub mod three;
     pub mod three_eq;
