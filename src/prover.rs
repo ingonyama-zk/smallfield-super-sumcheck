@@ -20,6 +20,7 @@ pub enum AlgorithmType {
     Precomputation,
     ToomCook,
     PrecomputationWithEq,
+    ToomCookWithEq,
 }
 
 /// Prover State
@@ -56,7 +57,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         }
 
         // sanity check 2: degree is consistent with the number of polynomials.
-        if algorithm == AlgorithmType::PrecomputationWithEq {
+        if algorithm == AlgorithmType::PrecomputationWithEq
+            || algorithm == AlgorithmType::ToomCookWithEq
+        {
             assert_eq!(
                 sumcheck_poly_degree,
                 polynomials.len() + 1,
@@ -151,6 +154,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 if (prover_state.algo == AlgorithmType::Precomputation)
                     || (prover_state.algo == AlgorithmType::ToomCook)
                     || (prover_state.algo == AlgorithmType::PrecomputationWithEq)
+                    || (prover_state.algo == AlgorithmType::ToomCookWithEq)
                 {
                     assert!(t_value <= prover_state.num_vars);
                     t_value
@@ -217,6 +221,23 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     mult_be,
                     mult_ee,
                     mult_bb,
+                    ef_combine_function,
+                )
+            }
+            AlgorithmType::ToomCookWithEq => {
+                Self::prove_with_eq_toom_cook_agorithm::<BE, EE, BB, EC>(
+                    prover_state,
+                    transcript,
+                    &mut r_polys,
+                    &eq_challenges.unwrap(),
+                    num_round_small_val,
+                    mult_be,
+                    mult_ee,
+                    mult_bb,
+                    mappings.unwrap(),
+                    projection_mapping_indices.unwrap(),
+                    interpolation_maps_bf.unwrap(),
+                    interpolation_maps_ef.unwrap(),
                     ef_combine_function,
                 )
             }
