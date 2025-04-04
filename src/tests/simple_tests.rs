@@ -405,61 +405,6 @@ mod simple_extension_tests {
         assert_eq!(result_dup.unwrap(), true);
     }
 
-    // I want to print multiplication matrix for debugging
-    // Print a matrix of multiplication of basic numbers
-    // Say we have 4 numbers: 1, 2, 3, 4
-    // The matrix will be:
-    // ┌         ┐
-    // │ 1 2 3 4 │
-    // │ 2 4 6 8 │
-    // │ 3 6 9 12│
-    // │ 4 8 12 16│
-    // └         ┘
-    fn print_multiplication_table(n: usize) {
-        // Generate numbers from 0 to n
-        let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
-
-        // Print the header row
-        print!("    ");
-        for &num in &numbers {
-            print!(" {:3}   ", num);
-        }
-        println!();
-        println!("   ----------------------------------------");
-
-        // Print the multiplication table
-        for &i in &numbers {
-            print!("{:3} | ", i);
-            for &j in &numbers {
-                print!("{:3}  ", (i * j).get_val());
-            }
-            println!();
-        }
-        println!("   ----------------------------------------");
-    }
-    fn print_addition_table(n: usize) {
-        // Generate numbers from 0 to n
-        let numbers: Vec<BF> = (0..=n).map(|i| BF::from(i as u32)).collect();
-
-        // Print the header row
-        print!("    ");
-        for &num in &numbers {
-            print!(" {:3}   ", num);
-        }
-        println!();
-        println!("   ----------------------------------------");
-
-        // Print the multiplication table
-        for &i in &numbers {
-            print!("{:3} | ", i);
-            for &j in &numbers {
-                print!("{:3}  ", (i + j).get_val());
-            }
-            println!();
-        }
-        println!("   ----------------------------------------");
-    }
-
     #[test]
     fn test_product_sumcheck_with_algorithm_3_eq() {
         // Define the combine function
@@ -636,11 +581,6 @@ mod simple_extension_tests {
             bb_element1 * bb_element2
         }
 
-        println!("MULT:");
-        print_multiplication_table(15);
-        println!("ADD:");
-        print_addition_table(15);
-
         // Take three simple polynomial
         let num_variables = 8;
         let num_evaluations = (1 as u32) << num_variables;
@@ -708,8 +648,6 @@ mod simple_extension_tests {
             interpolation_maps
         }
 
-        println!("Polynomials: {:#?}", polynomials);
-
         // Dummy eq challenges: [2, 3, ..., n+1]
         let dummy_eq_challenges: Vec<EF> = (0..num_variables)
             .map(|i| EF::from((i + 2) as u128))
@@ -749,8 +687,6 @@ mod simple_extension_tests {
 
         let mut new_polynomials = polynomials.clone();
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
-
-        println!("New Polynomials: {:#?}", new_polynomials);
 
         let mut prover_state_dup: ProverState<EF, BF> =
             IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);

@@ -86,9 +86,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut eq_1_right_basis = eq_1_basis[1..].to_vec();
         eq_1_right_basis.reverse();
 
-        println!("eq1 left basis: {:#?}", eq_1_left_basis);
-        println!("eq1 right basis: {:#?}", eq_1_right_basis);
-
         let eq_1_left_poly = EqPoly::new(eq_1_left_basis);
         let mut eq_1_left_staged_evals = eq_1_left_poly.compute_staged_evals(false);
         eq_1_left_staged_evals.insert(0, vec![EF::one()]);
@@ -97,14 +94,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut eq_1_right_staged_evals = eq_1_right_poly.compute_staged_evals(true);
         eq_1_right_staged_evals.reverse();
         eq_1_right_staged_evals.push(vec![EF::one()]);
-
-        println!("Round 1:");
-        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[0]);
-        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[0]);
-
-        println!("Round 2:");
-        println!("eq1 left staged evals: {:#?}", eq_1_left_staged_evals[1]);
-        println!("eq1 right staged evals: {:#?}", eq_1_right_staged_evals[1]);
 
         // Second equality polynomial is of the form: [ α_{n/2 + 1}, α_{n/2 + 2}, ..., α_n ]
         //
@@ -131,11 +120,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Note that second eq polynomial is constant in first n/2 rounds.
         //
         let eq_2_basis = eq_2_basis.to_vec();
-        println!("eq2 basis: {:#?}", eq_2_basis);
         let eq_2_poly = EqPoly::new(eq_2_basis);
         let eq_2_evals = eq_2_poly.compute_evals(false);
-
-        println!("eq2 evals: {:#?}", eq_2_evals);
 
         // Assert that the number of evaluations is correct
         assert_eq!(eq_1_left_staged_evals.len(), eq_1_right_staged_evals.len());
@@ -176,8 +162,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 matrix.heighten();
             }
         }
-
-        println!("matrix polynomials: {:#?}", matrix_polynomials);
 
         // Pre-compute the witness terms (toom-cook multiplication of witness polynomials)
         let r_degree = prover_state.max_multiplicands;
@@ -249,11 +233,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         );
         assert!(precomputed_witness_matrix.no_of_columns % eq_2_evals.len() == 0);
 
-        println!(
-            "precomputed witness matrix: {:#?}",
-            precomputed_witness_matrix
-        );
-
         // Let us compute the witness multiplied by eq2 evaluations
         // The precomputed witness matrix is of size: 2^t x (N / 2^t)
         let num_columns_in_compressed_witness =
@@ -281,11 +260,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             }
         }
 
-        println!(
-            "compressed witness matrix with eq2: {:#?}",
-            compressed_witness_with_eq_2
-        );
-
         // Let us iterate over the precomputed matrix and compute the witness terms
         // for each round.
         let mut pre_computed_array_with_eq: Vec<Vec<EF>> = vec![vec![]; round_small_val];
@@ -297,12 +271,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             let eq_1_right_for_round = &eq_1_right_staged_evals[round_number - 1];
             let eq_1_right_size = eq_1_right_for_round.len();
             let round_size = num_evals.pow(round_number as u32);
-            println!("round size: {:#?}", round_size);
-            println!("round number: {:#?}", round_number);
-            println!(
-                "compressed witness with eq2: {:#?}",
-                compressed_witness_with_eq_2
-            );
             assert_eq!(compressed_witness_with_eq_2.no_of_rows, round_size);
             assert_eq!(compressed_witness_with_eq_2.no_of_columns, eq_1_right_size);
 
@@ -321,24 +289,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             // Push the compressed witness matrix for this round to the pre-computed array
             pre_computed_array_with_eq[round_number - 1] = compressed_witness_eq_1_eq_2;
 
-            println!(
-                "BEFORE\ncompressed witness eq1 eq2: {:#?}",
-                compressed_witness_with_eq_2
-            );
-
             // Update extracted witness for next round
             compressed_witness_with_eq_2.extract_submatrix(num_evals, projection_mapping_indices);
-
-            println!(
-                "AFTER\ncompressed witness eq1 eq2: {:#?}",
-                compressed_witness_with_eq_2
-            );
         }
-
-        println!(
-            "precomputed array with eq: {:#?}",
-            pre_computed_array_with_eq
-        );
 
         // Now we will start the actual sumcheck protocol
         // Initialise empty challenge matrix
