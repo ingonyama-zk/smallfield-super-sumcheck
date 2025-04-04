@@ -960,12 +960,13 @@ where
         indices_to_include_in_chunk: &Vec<usize>,
     ) {
         // Sanity checks
-        assert!(chunk_size < self.no_of_rows);
+        assert!(chunk_size <= self.no_of_rows);
         assert!(self.no_of_rows % chunk_size == 0);
         assert!(indices_to_include_in_chunk.len() <= chunk_size);
         for index in indices_to_include_in_chunk.iter() {
             assert!(*index < chunk_size);
         }
+        self.no_of_columns *= indices_to_include_in_chunk.len();
 
         // Given a vector: [a1, a2, ..., ad, b1, b2, ..., bd, c1, c2, ..., cd, ...]
         // We want to create a new vector: [aj, ak, bj, bk, cj, ck, ...]
@@ -984,6 +985,7 @@ where
             // Remove the other rows in the chunk
             for _ in 1..chunk_size {
                 self.evaluation_rows.remove(chunk_index + 1);
+                self.no_of_rows -= 1;
             }
         }
     }
@@ -1737,6 +1739,16 @@ mod test {
             matrix.evaluation_rows,
             MatrixPolynomial::<BiniusTowerField>::from_u32(&expected, Some(5)).evaluation_rows
         );
+        assert_eq!(matrix.no_of_rows, 3);
+        assert_eq!(matrix.no_of_columns, 10);
+
+        matrix.extract_submatrix(1, &vec![0]);
+        assert_eq!(
+            matrix.evaluation_rows,
+            MatrixPolynomial::<BiniusTowerField>::from_u32(&expected, Some(5)).evaluation_rows
+        );
+        assert_eq!(matrix.no_of_rows, 3);
+        assert_eq!(matrix.no_of_columns, 10);
     }
 
     #[test]
