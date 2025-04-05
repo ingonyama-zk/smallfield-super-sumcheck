@@ -37,7 +37,9 @@ pub mod test_helpers {
             .into_iter()
             .map(|x| EF::new(x.get_val(), Some(num_levels)))
             .collect::<Vec<EF>>();
-        let eq_challenges = if algorithm == AlgorithmType::PrecomputationWithEq {
+        let eq_challenges = if algorithm == AlgorithmType::PrecomputationWithEq
+            || algorithm == AlgorithmType::ToomCookWithEq
+        {
             let eq_challenges = EF::rand_vector(nv, Some(num_levels));
             let eq_challenges_evals = EqPoly::new(eq_challenges.clone()).compute_evals(false);
             polynomial_hadamard_ef
@@ -53,7 +55,9 @@ pub mod test_helpers {
             .iter()
             .fold(EF::zero(), |acc, ph| acc + ph.clone());
 
-        let sumcheck_degree = if algorithm == AlgorithmType::PrecomputationWithEq {
+        let sumcheck_degree = if algorithm == AlgorithmType::PrecomputationWithEq
+            || algorithm == AlgorithmType::ToomCookWithEq
+        {
             degree + 1
         } else {
             degree

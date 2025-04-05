@@ -36,6 +36,8 @@ impl<F: TowerField> EqPoly<F> {
     ///                                   [c] * [b] * [a]
     ///
     pub fn compute_staged_evals(&self, is_little_endian: bool) -> Vec<Vec<F>> {
+        assert!(self.basis.len() == self.log_size);
+        assert!(self.basis.len() > 0);
         let mut staged_evals = Vec::with_capacity(self.log_size);
         staged_evals.push(vec![F::one() - self.basis[0], self.basis[0]]);
 
