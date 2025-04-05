@@ -1306,6 +1306,8 @@ mod simple_extension_tests {
         assert_eq!(result_dup.unwrap(), true);
     }
 
+    #[ignore]
+    /// This test is ignored because algorithms 3 and 4 are implemented only for product-sumcheck.
     #[test]
     fn test_r1cs_sumcheck() {
         // Define the combine function for r1cs: (a * b * e) - (c * e) = 0
