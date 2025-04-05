@@ -41,7 +41,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         let multiplicand_inv = match multiplicand {
             Some(m) => {
-                if algorithm == AlgorithmType::ToomCook {
+                if algorithm == AlgorithmType::ToomCook
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                {
                     m.inverse().unwrap()
                 } else {
                     EF::one()
@@ -53,7 +55,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut multiplicand_inv_pow_t = EF::one();
         let unwrapped_round_t = match round_t {
             Some(t) => {
-                if algorithm == AlgorithmType::ToomCook {
+                if algorithm == AlgorithmType::ToomCook
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                {
                     t
                 } else {
                     0

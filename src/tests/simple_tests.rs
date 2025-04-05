@@ -1195,13 +1195,13 @@ mod simple_extension_tests {
     fn test_product_sumcheck_with_algorithm_4_degree_5_without_inversions() {
         // Define the combine function
         fn combine_fn_bf(data: &Vec<BF>) -> EF {
-            assert!(data.len() == 5);
-            to_ef(&(data[0] * data[1] * data[2] * data[3] * data[4]))
+            assert!(data.len() == 6);
+            to_ef(&(data[0] * data[1] * data[2] * data[3] * data[4] * data[5]))
         }
 
         fn combine_fn_ef(data: &Vec<EF>) -> EF {
-            assert!(data.len() == 5);
-            data[0] * data[1] * data[2] * data[3] * data[4]
+            assert!(data.len() == 6);
+            data[0] * data[1] * data[2] * data[3] * data[4] * data[5]
         }
 
         // Convert a base field element to an extension field element
@@ -1230,7 +1230,7 @@ mod simple_extension_tests {
         }
 
         // Take five simple polynomial
-        let num_variables = 3;
+        let num_variables = 8;
         let num_evaluations = (1 as u32) << num_variables;
         let evaluations_a: Vec<BF> = (0..num_evaluations)
             .map(|i| BF::from((2 * i) % 7))
@@ -1247,15 +1247,6 @@ mod simple_extension_tests {
         let evaluations_e: Vec<BF> = (0..num_evaluations)
             .map(|i| BF::from((2 * i + 1) % 7))
             .collect();
-        let claimed_sum = (0..num_evaluations)
-            .map(|i| {
-                BF::from((2 * i) % 7)
-                    * BF::from((i + 1) % 7)
-                    * BF::from((i + 2) % 7)
-                    * BF::from((3 * i + 2) % 7)
-                    * BF::from((2 * i + 1) % 7)
-            })
-            .fold(BF::zero(), |acc, val| acc + val);
 
         let polynomials: Vec<LinearLagrangeList<BF>> = vec![
             LinearLagrangeList::<BF>::from_vector(&evaluations_a),
@@ -1315,11 +1306,37 @@ mod simple_extension_tests {
             generate_binomial_interpolation_mult_matrix_transpose::<EF>(5);
         assert_eq!(det_bf, det_ef);
 
+        println!("interpolation_matrix_ef: {:#?}", inter_matrix_ef);
+
         let imaps_base = get_maps_from_matrix::<BF>(&inter_matrix_bf);
         let imaps_ext = get_maps_from_matrix::<EF>(&inter_matrix_ef);
 
+        println!("Polynomials: {:#?}", polynomials);
+
+        // Dummy eq challenges: [2, 3, ..., n+1]
+        let dummy_eq_challenges: Vec<EF> = (0..num_variables)
+            .map(|i| EF::from((i + 2) as u128))
+            .collect();
+
+        // We want to compare round polynomial using Algo3Eq and Naive algorithm
+        let dumm_eq_poly = EqPoly::new(dummy_eq_challenges.clone());
+        let last_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
+        let claimed_sum = (0..num_evaluations)
+            .map(|i| {
+                BF::from((2 * i) % 7)
+                    * BF::from((i + 1) % 7)
+                    * BF::from((i + 2) % 7)
+                    * BF::from((3 * i + 2) % 7)
+                    * BF::from((2 * i + 1) % 7)
+                    * last_poly[i as usize]
+            })
+            .fold(BF::zero(), |acc, val| acc + val);
+
+        println!("Last polynomial:");
+        print_collection(&vec![last_poly.clone()], |c: &BF| c.get_val());
+
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 5, AlgorithmType::ToomCook);
+            IPForMLSumcheck::prover_init(&polynomials, 6, AlgorithmType::ToomCookWithEq);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1332,15 +1349,19 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             Some(3),
-            None,
+            Some(&dummy_eq_challenges),
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
         );
 
+        let mut new_polynomials = polynomials.clone();
+        new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&last_poly));
+        println!("New Polynomials: {:#?}", new_polynomials);
+
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 5, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&new_polynomials, 6, AlgorithmType::Naive);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
