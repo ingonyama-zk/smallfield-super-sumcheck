@@ -20,6 +20,7 @@ pub enum AlgorithmType {
     Precomputation,
     ToomCook,
     NaiveWithEq,
+    WitnessChallengeSeparationWithEq,
     PrecomputationWithEq,
     ToomCookWithEq,
 }
@@ -61,6 +62,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         if algorithm == AlgorithmType::PrecomputationWithEq
             || algorithm == AlgorithmType::ToomCookWithEq
             || algorithm == AlgorithmType::NaiveWithEq
+            || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq
         {
             assert_eq!(
                 sumcheck_poly_degree,
@@ -151,6 +153,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 prover_state.algo == AlgorithmType::NaiveWithEq
                     || prover_state.algo == AlgorithmType::PrecomputationWithEq
                     || prover_state.algo == AlgorithmType::ToomCookWithEq
+                    || prover_state.algo == AlgorithmType::WitnessChallengeSeparationWithEq,
+                "Eq challenges are only allowed for algorithms with Eq"
             );
             assert_eq!(eq_challenges.len(), prover_state.num_vars);
         }
@@ -226,6 +230,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 eq_challenges.unwrap(),
                 to_ef,
             ),
+            AlgorithmType::WitnessChallengeSeparationWithEq => {
+                Self::prove_with_eq_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
+                    prover_state,
+                    &bf_combine_function,
+                    transcript,
+                    &mut r_polys,
+                    eq_challenges.unwrap(),
+                    mult_be,
+                    &add_ee,
+                    &mult_ee,
+                )
+            }
             AlgorithmType::PrecomputationWithEq => {
                 Self::prove_with_eq_precomputation_agorithm::<BE, EE, BB, EC>(
                     prover_state,

@@ -379,6 +379,106 @@ mod simple_extension_tests {
     }
 
     #[test]
+    fn test_product_sumcheck_with_algorithm_2_with_eq() {
+        // Define the combine function
+        fn combine_fn_bf(data: &Vec<BF>) -> EF {
+            assert!(data.len() == 2);
+            to_ef(&(data[0] * data[1]))
+        }
+
+        fn combine_fn_ef(data: &Vec<EF>) -> EF {
+            assert!(data.len() == 2);
+            data[0] * data[1]
+        }
+
+        // Convert a base field element to an extension field element
+        fn to_ef(base_field_element: &BF) -> EF {
+            EF::new(base_field_element.get_val(), None)
+        }
+
+        // Multiplies a base field element to an extension field element
+        fn mult_be(base_field_element: &BF, extension_field_element: &EF) -> EF {
+            extension_field_element * base_field_element
+        }
+
+        // Adds two extension field elements
+        fn add_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 + ee_element2
+        }
+
+        // Multiplies an extension field element to an extension field element
+        fn mult_ee(ee_element1: &EF, ee_element2: &EF) -> EF {
+            ee_element1 * ee_element2
+        }
+
+        // Multiplies a base field element to a base field element
+        fn mult_bb(bb_element1: &BF, bb_element2: &BF) -> BF {
+            bb_element1 * bb_element2
+        }
+
+        // Take two simple polynomial
+        let num_variables = 8;
+        let num_evaluations = (1 as u32) << num_variables;
+        let evaluations_a: Vec<BF> = (0..num_evaluations)
+            .map(|i| BF::new((2 * i) as u128, Some(1)))
+            .collect();
+        let evaluations_b: Vec<BF> = (0..num_evaluations)
+            .map(|i| BF::new((i + 1) as u128, Some(1)))
+            .collect();
+
+        let polynomials: Vec<LinearLagrangeList<BF>> = vec![
+            LinearLagrangeList::<BF>::from_vector(&evaluations_a),
+            LinearLagrangeList::<BF>::from_vector(&evaluations_b),
+        ];
+
+        // Generate random eq challenges (in a SNARK setting, this would be provided by the verifier)
+        let eq_challenges = EF::rand_vector(num_variables, Some(3));
+
+        // We want to compare round polynomial using Algo3Eq and Naive algorithm
+        let dumm_eq_poly = EqPoly::new(eq_challenges.clone());
+        let eq_poly: Vec<BF> = dumm_eq_poly.compute_evals(false);
+
+        let claimed_sum = (0..(num_evaluations as usize))
+            .map(|i| evaluations_a[i] * evaluations_b[i] * eq_poly[i])
+            .fold(EF::zero(), |acc, val| acc + val);
+
+        let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
+            &polynomials,
+            3,
+            AlgorithmType::WitnessChallengeSeparationWithEq,
+        );
+        let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
+        let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
+            &mut prover_state,
+            &combine_fn_ef,
+            &combine_fn_bf,
+            &mut prover_transcript,
+            &to_ef,
+            &mult_be,
+            &add_ee,
+            &mult_ee,
+            &mult_bb,
+            None,
+            Some(&eq_challenges),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
+        let result = IPForMLSumcheck::<EF, BF>::verify(
+            to_ef(&claimed_sum),
+            &proof,
+            &mut verifier_transcript,
+            AlgorithmType::WitnessChallengeSeparation,
+            None,
+            None,
+        );
+        assert_eq!(result.unwrap(), true);
+    }
+
+    #[test]
     fn test_product_sumcheck_with_algorithm_3() {
         // Define the combine function
         fn combine_fn_bf(data: &Vec<BF>) -> EF {

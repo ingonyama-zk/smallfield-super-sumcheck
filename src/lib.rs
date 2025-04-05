@@ -16,6 +16,7 @@ pub mod algorithms {
     pub mod three;
     pub mod three_eq;
     pub mod two;
+    pub mod two_eq;
 }
 
 pub mod tower_fields;
