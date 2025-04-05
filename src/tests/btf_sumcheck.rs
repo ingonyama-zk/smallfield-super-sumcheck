@@ -148,7 +148,7 @@ mod fq4_tests {
         // println!("mult_bb was called {} times", get_bb_count());
 
         let mut round_t_v = round_t;
-        if algorithm != AlgorithmType::ToomCook || algorithm != AlgorithmType::ToomCookWithEq {
+        if !(algorithm == AlgorithmType::ToomCook || algorithm == AlgorithmType::ToomCookWithEq) {
             scaled_det = BF::one();
             round_t_v = 0;
         }
