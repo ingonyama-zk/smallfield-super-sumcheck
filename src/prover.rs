@@ -19,6 +19,7 @@ pub enum AlgorithmType {
     WitnessChallengeSeparation,
     Precomputation,
     ToomCook,
+    NaiveWithEq,
     PrecomputationWithEq,
     ToomCookWithEq,
 }
@@ -59,6 +60,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // sanity check 2: degree is consistent with the number of polynomials.
         if algorithm == AlgorithmType::PrecomputationWithEq
             || algorithm == AlgorithmType::ToomCookWithEq
+            || algorithm == AlgorithmType::NaiveWithEq
         {
             assert_eq!(
                 sumcheck_poly_degree,
@@ -145,6 +147,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Check if eq challenges length is equal to the number of variables
         if let Some(eq_challenges) = eq_challenges {
+            assert!(
+                prover_state.algo == AlgorithmType::NaiveWithEq
+                    || prover_state.algo == AlgorithmType::PrecomputationWithEq
+                    || prover_state.algo == AlgorithmType::ToomCookWithEq
+            );
             assert_eq!(eq_challenges.len(), prover_state.num_vars);
         }
 
@@ -210,6 +217,14 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 interpolation_maps_bf.unwrap(),
                 interpolation_maps_ef.unwrap(),
                 ef_combine_function,
+            ),
+            AlgorithmType::NaiveWithEq => Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
+                prover_state,
+                &ef_combine_function,
+                transcript,
+                &mut r_polys,
+                eq_challenges.unwrap(),
+                to_ef,
             ),
             AlgorithmType::PrecomputationWithEq => {
                 Self::prove_with_eq_precomputation_agorithm::<BE, EE, BB, EC>(
