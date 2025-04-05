@@ -117,7 +117,8 @@ mod fq4_tests {
         if eq_challenges.is_some() {
             assert!(
                 algorithm == AlgorithmType::PrecomputationWithEq
-                    || algorithm == AlgorithmType::ToomCookWithEq,
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                    || algorithm == AlgorithmType::NaiveWithEq,
                 "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
             );
         }
@@ -196,6 +197,38 @@ mod fq4_tests {
         assert_eq!(
             // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
             sumcheck_test_helper(16, deg, thresh, AlgorithmType::Naive, 1)
+                .1
+                .unwrap(),
+            true
+        );
+
+        //
+        // NAIVE with eq polynomial
+        //
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(10, deg, thresh, AlgorithmType::NaiveWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(12, deg, thresh, AlgorithmType::NaiveWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(14, deg, thresh, AlgorithmType::NaiveWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::NaiveWithEq, 1)
                 .1
                 .unwrap(),
             true
@@ -331,6 +364,7 @@ mod fq4_tests {
             AlgorithmType::WitnessChallengeSeparation,
             AlgorithmType::Precomputation,
             AlgorithmType::ToomCook,
+            AlgorithmType::NaiveWithEq,
             AlgorithmType::PrecomputationWithEq,
             AlgorithmType::ToomCookWithEq
         )]

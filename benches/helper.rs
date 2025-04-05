@@ -127,7 +127,7 @@ pub fn sumcheck_prove_bench(
                         if eq_challenges.is_some() {
                             assert!(
                                 algorithm == AlgorithmType::PrecomputationWithEq
-                                    || algorithm == AlgorithmType::ToomCookWithEq,
+                                    || algorithm == AlgorithmType::ToomCookWithEq || algorithm == AlgorithmType::NaiveWithEq,
                                 "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
                             );
                         }

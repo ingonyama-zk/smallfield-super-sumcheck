@@ -39,7 +39,8 @@ pub mod test_helpers {
             .collect::<Vec<EF>>();
 
         let is_algo_with_eq_poly = algorithm == AlgorithmType::PrecomputationWithEq
-            || algorithm == AlgorithmType::ToomCookWithEq;
+            || algorithm == AlgorithmType::ToomCookWithEq
+            || algorithm == AlgorithmType::NaiveWithEq;
         let eq_challenges = if is_algo_with_eq_poly {
             let eq_challenges = EF::rand_vector(nv, Some(num_levels));
             let eq_challenges_evals = EqPoly::new(eq_challenges.clone()).compute_evals(false);
