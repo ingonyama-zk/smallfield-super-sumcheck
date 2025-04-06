@@ -118,7 +118,8 @@ mod fq4_tests {
             assert!(
                 algorithm == AlgorithmType::PrecomputationWithEq
                     || algorithm == AlgorithmType::ToomCookWithEq
-                    || algorithm == AlgorithmType::NaiveWithEq,
+                    || algorithm == AlgorithmType::NaiveWithEq
+                    || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq,
                 "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
             );
         }
@@ -365,6 +366,7 @@ mod fq4_tests {
             AlgorithmType::Precomputation,
             AlgorithmType::ToomCook,
             AlgorithmType::NaiveWithEq,
+            AlgorithmType::WitnessChallengeSeparationWithEq,
             AlgorithmType::PrecomputationWithEq,
             AlgorithmType::ToomCookWithEq
         )]

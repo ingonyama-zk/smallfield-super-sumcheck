@@ -96,7 +96,7 @@ pub struct ProverInputs {
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
 }
 
-const NUM_VARIABLES_RANGE: Range<usize> = 10..21;
+const NUM_VARIABLES_RANGE: Range<usize> = 14..21;
 
 pub fn sumcheck_prove_bench(
     c: &mut Criterion,
@@ -109,10 +109,11 @@ pub fn sumcheck_prove_bench(
     for nv in NUM_VARIABLES_RANGE {
         group.significance_level(0.05).sample_size(10);
         let function_name: String = format!(
-            "BabyBear/Algorithm/{:?}/Degree/{}/round_t: {}",
-            algorithm, degree, round_t
+            "btf_{}/Algorithm/{:?}/Degree/{}/round_t: {}",
+            (1 << num_levels), algorithm, degree, round_t
         );
-        group.bench_function(BenchmarkId::new(function_name, nv), |b| {
+        group
+            .bench_function(BenchmarkId::new(function_name, nv), |b| {
             b.iter_batched_ref(
                 || -> ProverInputs {
                     {
@@ -127,7 +128,9 @@ pub fn sumcheck_prove_bench(
                         if eq_challenges.is_some() {
                             assert!(
                                 algorithm == AlgorithmType::PrecomputationWithEq
-                                    || algorithm == AlgorithmType::ToomCookWithEq || algorithm == AlgorithmType::NaiveWithEq,
+                                    || algorithm == AlgorithmType::ToomCookWithEq 
+                                    || algorithm == AlgorithmType::NaiveWithEq 
+                                    || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq,
                                 "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
                             );
                         }

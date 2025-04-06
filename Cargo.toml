@@ -41,6 +41,12 @@ name = "btf_smallfield_sumcheck_with_eq_bench"
 path = "benches/btf_sumcheck_with_eq.rs"
 harness = false
 
+# Run using `cargo bench --bench btf_smallfield_sumcheck_with_eq_thresh_bench`
+[[bench]]
+name = "btf_smallfield_sumcheck_with_eq_thresh_bench"
+path = "benches/btf_sumcheck_with_eq_thresh.rs"
+harness = false
+
 # Run using `cargo bench --bench btf_bench`
 [[bench]]
 name = "btf_bench"
