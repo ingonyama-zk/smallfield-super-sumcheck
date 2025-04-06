@@ -3,6 +3,7 @@ use std::{
     vec,
 };
 
+use itertools::Itertools;
 use num::One;
 use num::Zero;
 use rayon::prelude::*;
@@ -296,7 +297,7 @@ pub struct MatrixPolynomial<F: Field> {
 ///
 /// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix (integer) form.
 ///
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MatrixPolynomialInt<T> {
     pub no_of_rows: usize,
     pub no_of_columns: usize,
@@ -327,6 +328,14 @@ where
             no_of_columns: mid_point,
             evaluation_rows: vec![first_half.to_vec(), second_half.to_vec()],
         }
+    }
+
+    pub fn get_column(&self, column_index: usize) -> Vec<T> {
+        let mut column = Vec::with_capacity(self.no_of_rows);
+        for i in 0..self.no_of_rows {
+            column.push(self.evaluation_rows[i][column_index]);
+        }
+        column
     }
 
     pub fn heighten(&mut self) {
@@ -383,6 +392,45 @@ where
                 local_output.iter().copied().sum()
             })
             .collect()
+    }
+
+    // We want to compute tensor product of the columns of the matrices and store them in a vector.
+    pub fn tensor_column_products(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<Vec<T>>
+    where
+        T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        // Use parallel iteration over columns
+        (0..col_count)
+            .into_par_iter()
+            .map(|i| {
+                // Get all columns at index i for each matrix
+                let columns: Vec<Vec<T>> =
+                    matrices.iter().map(|matrix| matrix.get_column(i)).collect();
+
+                // Compute the tensor product of the columns
+                columns
+                    .into_iter()
+                    .multi_cartesian_product()
+                    .map(|comb| {
+                        // Multiply all the elements in the combination
+                        comb.iter().fold(T::one(), |mut acc, c_value| {
+                            acc *= *c_value;
+                            acc
+                        })
+                    })
+                    .collect::<Vec<T>>()
+            })
+            .collect::<Vec<Vec<T>>>()
     }
 
     pub fn compute_merkle_roots(
@@ -560,6 +608,30 @@ impl<F: Field> MatrixPolynomial<F> {
                     .collect(),
             ],
         }
+    }
+
+    pub fn from_u32(input_vec: &Vec<Vec<u32>>) -> Self {
+        // Convert u32 to F
+        let n = input_vec.len();
+        let c = input_vec[0].len();
+        let mut eval_rows = Vec::with_capacity(n);
+        for u32_row in input_vec.iter() {
+            let f_row: Vec<F> = u32_row.iter().map(|&u| F::from(u)).collect();
+            eval_rows.push(f_row);
+        }
+        MatrixPolynomial {
+            no_of_rows: n,
+            no_of_columns: c,
+            evaluation_rows: eval_rows,
+        }
+    }
+
+    pub fn get_column(&self, column_index: usize) -> Vec<F> {
+        let mut column = Vec::with_capacity(self.no_of_rows);
+        for i in 0..self.no_of_rows {
+            column.push(self.evaluation_rows[i][column_index]);
+        }
+        column
     }
 
     pub fn heighten(&mut self) {
@@ -754,6 +826,47 @@ impl<F: Field> MatrixPolynomial<F> {
         output
     }
 
+    pub fn tensor_column_products<P>(
+        matrices: &Vec<MatrixPolynomial<F>>,
+        mult_bb: &P,
+    ) -> Vec<Vec<F>>
+    where
+        P: Fn(&F, &F) -> F + std::marker::Sync,
+    {
+        let d = matrices.len();
+        let row_count = matrices[0].no_of_rows;
+        let col_count = matrices[0].no_of_columns;
+        assert!(row_count.is_power_of_two());
+        assert!(col_count.is_power_of_two());
+        for i in 1..d {
+            assert_eq!(matrices[i].no_of_rows, row_count);
+            assert_eq!(matrices[i].no_of_columns, col_count);
+        }
+
+        // Use parallel iteration over columns
+        (0..col_count)
+            .into_par_iter()
+            .map(|i| {
+                // Get all columns at index i for each matrix
+                let columns: Vec<Vec<F>> =
+                    matrices.iter().map(|matrix| matrix.get_column(i)).collect();
+
+                // Compute the tensor product of the columns
+                columns
+                    .into_iter()
+                    .multi_cartesian_product()
+                    .map(|comb| {
+                        // Multiply all the elements in the combination
+                        comb.iter().fold(F::one(), |mut acc, c_value| {
+                            acc = mult_bb(&acc, &c_value);
+                            acc
+                        })
+                    })
+                    .collect::<Vec<F>>()
+            })
+            .collect::<Vec<Vec<F>>>()
+    }
+
     pub fn collapse(&mut self) {
         if self.no_of_columns == 1 {
             return;
@@ -765,6 +878,121 @@ impl<F: Field> MatrixPolynomial<F> {
                     .iter()
                     .fold(F::zero(), |sum, &r| sum + r);
                 self.evaluation_rows[i] = vec![new_value];
+            }
+        }
+    }
+
+    pub fn extract_subtensors(tensor: &Vec<F>, d: usize) -> (Vec<F>, Vec<F>) {
+        let current_len = tensor.len();
+        assert!(current_len.is_power_of_two());
+        let n: usize = 1 << (log2(current_len) as usize / d);
+        let m = n / 2; // Reduced size per dimension (step = 2)
+        let mut even_subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+        let mut odd_subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+
+        // Generate selected indices for each dimension: {0, 2, 4, 6, ...}
+        let even_indices: Vec<usize> = (0..n).step_by(2).collect();
+
+        // Compute all index combinations efficiently using cartesian product of even indices
+        vec![even_indices.clone(); d as usize]
+            .into_iter()
+            .multi_cartesian_product()
+            .for_each(|indices| {
+                // Compute 1D row-major index
+                let even_index = indices.iter().fold(0, |acc, &v| acc * n + v);
+                let odd_index = indices.iter().fold(0, |acc, &v| acc * n + ((v + 1) % n));
+                even_subtensor.push(tensor[even_index]);
+                odd_subtensor.push(tensor[odd_index]);
+            });
+
+        (even_subtensor, odd_subtensor)
+    }
+
+    pub fn extract_subtensor_with_offset(
+        tensor: &Vec<F>,
+        d: usize,
+        step: usize,
+        offset: usize,
+    ) -> Vec<F> {
+        let current_len = tensor.len();
+        assert!(current_len.is_power_of_two());
+        assert!(step.is_power_of_two());
+        let n: usize = 1 << (log2(current_len) as usize / d);
+        let m = n / step; // Reduced size per dimension
+        let mut subtensor: Vec<F> = Vec::with_capacity(m.pow(d as u32));
+
+        // Generate selected indices for each dimension: {0, s, 2s, 3s, ...}
+        let selected_indices: Vec<usize> = (0..n).step_by(step).collect();
+
+        // Generate selected indices with offset for each dimension: {o, s + o, 2s + o, ...}
+        let offset_indices: Vec<usize> =
+            selected_indices.iter().map(|&v| (v + offset) % n).collect();
+
+        // Compute all index combinations efficiently using cartesian product of even indices
+        vec![offset_indices.clone(); d as usize]
+            .into_iter()
+            .multi_cartesian_product()
+            .for_each(|indices| {
+                // Compute 1D row-major index
+                let index = indices.iter().fold(0, |acc, &v| acc * n + v);
+                subtensor.push(tensor[index]);
+            });
+
+        subtensor
+    }
+
+    pub fn extract_subtensors_from_tensors(
+        tensors: &Vec<Vec<F>>,
+        d: usize,
+        step: usize,
+    ) -> Vec<Vec<F>> {
+        let current_len = tensors[0].len();
+        assert!(current_len.is_power_of_two());
+        assert!(step.is_power_of_two());
+        let mut subtensors: Vec<Vec<F>> = Vec::with_capacity(step * tensors.len());
+
+        for offset in 0..step {
+            for tensor in tensors.iter() {
+                subtensors.push(MatrixPolynomial::extract_subtensor_with_offset(
+                    tensor, d, step, offset,
+                ));
+            }
+        }
+        subtensors
+    }
+
+    pub fn extract_submatrix(
+        &mut self,
+        chunk_size: usize,
+        indices_to_include_in_chunk: &Vec<usize>,
+    ) {
+        // Sanity checks
+        assert!(chunk_size <= self.no_of_rows);
+        assert!(self.no_of_rows % chunk_size == 0);
+        assert!(indices_to_include_in_chunk.len() <= chunk_size);
+        for index in indices_to_include_in_chunk.iter() {
+            assert!(*index < chunk_size);
+        }
+        self.no_of_columns *= indices_to_include_in_chunk.len();
+
+        // Given a vector: [a1, a2, ..., ad, b1, b2, ..., bd, c1, c2, ..., cd, ...]
+        // We want to create a new vector: [aj, ak, bj, bk, cj, ck, ...]
+        // where j and k are the indices in indices_to_include_in_chunk.
+        for chunk_index in 0..(self.no_of_rows / chunk_size) {
+            // Create a new vector for the current chunk
+            let mut new_row_for_chunk: Vec<F> =
+                Vec::with_capacity(indices_to_include_in_chunk.len() * self.no_of_columns);
+            for i in indices_to_include_in_chunk.iter() {
+                new_row_for_chunk.extend_from_slice(&self.evaluation_rows[chunk_index + i]);
+            }
+
+            // Replace the old chunk with the new one
+            self.evaluation_rows[chunk_index] = new_row_for_chunk;
+
+            // Remove the other rows in the chunk
+            for _ in 1..chunk_size {
+                self.evaluation_rows.remove(chunk_index + 1);
+                self.no_of_rows -= 1;
             }
         }
     }
@@ -918,6 +1146,10 @@ mod test {
         let mut rng = rand::thread_rng();
         let random_u128: u128 = rng.gen();
         F::from(random_u128)
+    }
+
+    pub fn rand_vector<F: Field>(size: usize) -> Vec<F> {
+        (0..size).map(|_| random_field_element()).collect()
     }
 
     pub fn get_random_linear_lagrange<F: Field>() -> LinearLagrange<F> {
@@ -1289,6 +1521,257 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_matrix_polynomial_tensor_columns_product() {
+        let num_variables = 6;
+        let num_evaluations: usize = (1 as usize) << num_variables;
+        let evaluations_a = rand_vector(num_evaluations);
+        let evaluations_b = rand_vector(num_evaluations);
+        let evaluations_c = rand_vector(num_evaluations);
+        let evaluations_d = rand_vector(num_evaluations);
+        fn mult_bb(left: &F, right: &F) -> F {
+            left * right
+        }
+
+        let mut matrix_poly_a = MatrixPolynomial::from_evaluations_vec(&evaluations_a);
+        let mut matrix_poly_b = MatrixPolynomial::from_evaluations_vec(&evaluations_b);
+        let mut matrix_poly_c = MatrixPolynomial::from_evaluations_vec(&evaluations_c);
+        let mut matrix_poly_d = MatrixPolynomial::from_evaluations_vec(&evaluations_d);
+
+        // First flatten all matrix polynomials
+        flatten(&mut matrix_poly_a);
+        flatten(&mut matrix_poly_b);
+        flatten(&mut matrix_poly_c);
+        flatten(&mut matrix_poly_d);
+
+        let output_1 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
+            ],
+            &mult_bb,
+        );
+
+        let mut expected = Vec::with_capacity(num_evaluations as usize);
+        for (a, b, c, d) in izip!(
+            &evaluations_a,
+            &evaluations_b,
+            &evaluations_c,
+            &evaluations_d,
+        ) {
+            expected.push(vec![a * b * c.clone() * d.clone()]);
+        }
+        assert_eq!(output_1.len(), num_evaluations as usize);
+        assert_eq!(expected, output_1);
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+        matrix_poly_d.heighten();
+
+        let output_2 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_2.len(), num_evaluations / 2);
+        assert_eq!(output_2[0].len(), 1 << 4);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        let num_cols = matrix_poly_a.no_of_columns;
+        for col_idx in 0..num_cols {
+            for i in 0..num_rows {
+                for j in 0..num_rows {
+                    for k in 0..num_rows {
+                        for l in 0..num_rows {
+                            let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                                * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                                * matrix_poly_c.evaluation_rows[k as usize][col_idx]
+                                * matrix_poly_d.evaluation_rows[l as usize][col_idx];
+                            let index = l
+                                + k * num_rows
+                                + j * num_rows * num_rows
+                                + i * num_rows * num_rows * num_rows;
+                            assert_eq!(expected, output_2[col_idx][index as usize]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now lets heighten and try the same operation again
+        matrix_poly_a.heighten();
+        matrix_poly_b.heighten();
+        matrix_poly_c.heighten();
+        matrix_poly_d.heighten();
+
+        let output_3 = MatrixPolynomial::tensor_column_products(
+            &vec![
+                matrix_poly_a.clone(),
+                matrix_poly_b.clone(),
+                matrix_poly_c.clone(),
+                matrix_poly_d.clone(),
+            ],
+            &mult_bb,
+        );
+        assert_eq!(output_3.len(), num_evaluations / 4);
+        assert_eq!(output_3[0].len(), 1 << 8);
+
+        let num_rows = matrix_poly_a.no_of_rows;
+        let num_cols = matrix_poly_a.no_of_columns;
+        for col_idx in 0..num_cols {
+            for i in 0..num_rows {
+                for j in 0..num_rows {
+                    for k in 0..num_rows {
+                        for l in 0..num_rows {
+                            let expected = matrix_poly_a.evaluation_rows[i as usize][col_idx]
+                                * matrix_poly_b.evaluation_rows[j as usize][col_idx]
+                                * matrix_poly_c.evaluation_rows[k as usize][col_idx]
+                                * matrix_poly_d.evaluation_rows[l as usize][col_idx];
+                            let index = l
+                                + k * num_rows
+                                + j * num_rows * num_rows
+                                + i * num_rows * num_rows * num_rows;
+                            assert_eq!(expected, output_3[col_idx][index as usize]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if the subtensor extraction works as intended
+        for (i, output_3_tensor) in output_3.iter().enumerate() {
+            let (even_extracted_subtensor, odd_extracted_subtensor) =
+                MatrixPolynomial::extract_subtensors(output_3_tensor, 4);
+            assert_eq!(even_extracted_subtensor.len(), output_2[i].len());
+            assert_eq!(even_extracted_subtensor, output_2[i]);
+            assert_eq!(
+                odd_extracted_subtensor.len(),
+                output_2[output_3.len() + i].len()
+            );
+            assert_eq!(odd_extracted_subtensor, output_2[output_3.len() + i]);
+        }
+
+        for (i, output_2_tensor) in output_2.iter().enumerate() {
+            let (even_extracted_subtensor, odd_extracted_subtensor) =
+                MatrixPolynomial::extract_subtensors(output_2_tensor, 4);
+            assert_eq!(even_extracted_subtensor.len(), output_1[i].len());
+            assert_eq!(even_extracted_subtensor, output_1[i]);
+
+            assert_eq!(
+                odd_extracted_subtensor.len(),
+                output_1[output_2.len() + i].len()
+            );
+            assert_eq!(odd_extracted_subtensor, output_1[output_2.len() + i]);
+        }
+
+        // Okay so we want to extract full subtensors from output_3
+        // The idea is that we are only going to pre-compute output_3 and then extract subtensors
+        // from it, and use them. In this case, we will then compare the extracted subtensors with
+        // the pre-computed output_2 and output_1.
+        //
+        // Check if extract subtensors with offset works as intended
+        let mut subtensor_output_2 = Vec::with_capacity(num_evaluations / 2);
+        let step_2 = 2;
+        for offset in 0..step_2 {
+            for output_3_tensor in output_3.iter() {
+                let extracted_subtensor = MatrixPolynomial::extract_subtensor_with_offset(
+                    output_3_tensor,
+                    4,
+                    step_2,
+                    offset,
+                );
+                subtensor_output_2.push(extracted_subtensor);
+            }
+        }
+        assert_eq!(subtensor_output_2, output_2);
+
+        let mut subtensor_output_1 = Vec::with_capacity(num_evaluations);
+        let step_1 = 4;
+        for offset in 0..step_1 {
+            for output_3_tensor in output_3.iter() {
+                let extracted_subtensor = MatrixPolynomial::extract_subtensor_with_offset(
+                    output_3_tensor,
+                    4,
+                    step_1,
+                    offset,
+                );
+                subtensor_output_1.push(extracted_subtensor);
+            }
+        }
+
+        // Lets also check if the combined extraction of subtensors works as intended
+        let combined_output_2_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 2);
+        assert_eq!(combined_output_2_from_output_3, output_2);
+
+        let combined_output_1_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 4);
+        assert_eq!(combined_output_1_from_output_3, output_1);
+
+        // Check also if extracting subtensors with step = 1 just returns the input
+        let combined_output_3_from_output_3 =
+            MatrixPolynomial::extract_subtensors_from_tensors(&output_3, 4, 1);
+        assert_eq!(combined_output_3_from_output_3, output_3);
+    }
+
+    #[test]
+    fn test_extract_submatrix() {
+        // Define a struct instance with initial rows (6x4 matrix)
+        let example_matrix: Vec<Vec<u32>> = vec![
+            vec![1, 2, 3, 4, 5],      // a1
+            vec![6, 7, 8, 9, 10],     // a2
+            vec![11, 12, 13, 14, 15], // a3
+            vec![16, 17, 18, 19, 20], // b1
+            vec![21, 22, 23, 24, 25], // b2
+            vec![26, 27, 28, 29, 30], // b3
+            vec![31, 32, 33, 34, 35], // c1
+            vec![36, 37, 38, 39, 40], // c2
+            vec![41, 42, 43, 44, 45], // c3
+        ];
+
+        let mut matrix = MatrixPolynomial::<F>::from_u32(&example_matrix);
+
+        // Define chunk size and indices to extract
+        let chunk_size = 3;
+        let indices_to_include_in_chunk = vec![1, 2]; // Extract 2nd and 3rd row from each chunk
+
+        // Call the function
+        matrix.extract_submatrix(chunk_size, &indices_to_include_in_chunk);
+
+        // Expected output:
+        // - From (a1, a2, a3), we keep (a2, a3)
+        // - From (b1, b2, b3), we keep (b2, b3)
+        // - From (c1, c2, c3), we keep (c2, c3)
+        let expected = vec![
+            vec![6, 7, 8, 9, 10, 11, 12, 13, 14, 15],     // (a2 || a3)
+            vec![21, 22, 23, 24, 25, 26, 27, 28, 29, 30], // (b2 || b3)
+            vec![36, 37, 38, 39, 40, 41, 42, 43, 44, 45], // (c2 || c3)
+        ];
+
+        assert_eq!(
+            matrix.evaluation_rows,
+            MatrixPolynomial::<F>::from_u32(&expected).evaluation_rows
+        );
+        assert_eq!(matrix.no_of_rows, 3);
+        assert_eq!(matrix.no_of_columns, 10);
+
+        matrix.extract_submatrix(1, &vec![0]);
+        assert_eq!(
+            matrix.evaluation_rows,
+            MatrixPolynomial::<F>::from_u32(&expected).evaluation_rows
+        );
+        assert_eq!(matrix.no_of_rows, 3);
+        assert_eq!(matrix.no_of_columns, 10);
     }
 
     #[test]
