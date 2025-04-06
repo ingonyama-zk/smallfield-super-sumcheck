@@ -1,18 +1,22 @@
+use std::os::macos::raw::stat;
+
 use merlin::Transcript;
 
 use crate::btf_transcript::TFTranscriptProtocol;
-use crate::data_structures::MatrixPolynomial;
+use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
+use crate::eq_poly::EqPoly;
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
 
 impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Algorithm 2
-    pub fn prove_with_witness_challenge_sep_agorithm<BC, BE, AEE, EE>(
+    pub fn prove_with_eq_witness_challenge_sep_agorithm<BC, BE, AEE, EE>(
         prover_state: &mut ProverState<EF, BF>,
         bf_combine_function: &BC,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
+        eq_challenges: &Vec<EF>,
         mult_be: &BE,
         add_ee: &AEE,
         mult_ee: &EE,
@@ -22,13 +26,20 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         AEE: Fn(&EF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
     {
+        // Compute the equality polynomial from its basis.
+        let eq_poly = EqPoly::new(eq_challenges.to_vec());
+        let eq_evals = eq_poly.compute_evals(false);
+        let eq_state_poly = LinearLagrangeList::from_vector(&eq_evals);
+
         // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
         let r_degree = prover_state.max_multiplicands;
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
-        let alpha = Self::compute_round_polynomial::<BC, BF>(
+        // Note that we still need to multiply the equality polynomial with the base field polynomials.
+        let alpha = Self::compute_round_polynomial_with_eq::<BC, BF>(
             1,
             &prover_state.state_polynomials,
+            &eq_state_poly,
             round_polynomials,
             r_degree,
             &bf_combine_function,
@@ -48,14 +59,16 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // row 1: [ p(1, 1, x) ]
         //
         // and so on.
-        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> =
-            Vec::with_capacity(prover_state.max_multiplicands);
+        let num_polys = prover_state.state_polynomials.len();
+        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(num_polys);
 
-        for i in 0..prover_state.max_multiplicands {
+        for i in 0..num_polys {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));
         }
+
+        let mut eq_matrix_polynomial = MatrixPolynomial::from_linear_lagrange_list(&eq_state_poly);
 
         // This matrix will store challenges in the form:
         // [ (1-α_1)(1-α_2)...(1-α_m) ]
@@ -140,6 +153,47 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                         .for_each(|(m_acc, m_curr)| *m_acc = mult_ee(m_acc, &m_curr));
                 }
 
+                // Now we need to multiply the equality polynomial with the base field polynomials.
+                let mut eq_poly_evaluation_at_k: Vec<EF> =
+                    vec![EF::zero(); eq_matrix_polynomial.evaluation_rows[0].len() / 2];
+                for (row_idx, eq_row) in eq_matrix_polynomial.evaluation_rows.iter().enumerate() {
+                    let width = eq_row.len();
+                    let (even, odd) = eq_row.split_at(width / 2);
+
+                    let eq_row_evaluation_at_k: Vec<EF> = even
+                        .iter()
+                        .zip(odd.iter())
+                        .map(|(&e, &o)| {
+                            (EF::one() - EF::new(k as u128, None)) * e
+                                + EF::new(k as u128, None) * o
+                        })
+                        .collect();
+
+                    // ATTENTION: ee multiplication
+                    let eq_row_evaluation_at_k_mult_by_challenge: Vec<EF> = eq_row_evaluation_at_k
+                        .iter()
+                        .map(|ek| {
+                            mult_ee(
+                                &ek,
+                                &challenge_matrix_polynomial.evaluation_rows[row_idx][0],
+                            )
+                        })
+                        .collect();
+
+                    // ATTENTION: addition of extension field elements
+                    eq_poly_evaluation_at_k
+                        .iter_mut()
+                        .zip(eq_row_evaluation_at_k_mult_by_challenge.iter())
+                        .for_each(|(m_acc, m_curr)| *m_acc = add_ee(m_acc, &m_curr));
+                }
+
+                // ATTENTION: multiplication of extension field elements (ee)
+                // TODO: We can use the combine function to generalise this.
+                poly_hadamard_product
+                    .iter_mut()
+                    .zip(eq_poly_evaluation_at_k.iter())
+                    .for_each(|(m_acc, m_curr)| *m_acc = mult_ee(m_acc, &m_curr));
+
                 // ATTENTION: addition of extension field elements
                 round_polynomials[round_number - 1][k as usize] = poly_hadamard_product
                     .iter()
@@ -170,9 +224,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             // Heighten the witness polynomial matrices
-            for j in 0..prover_state.max_multiplicands {
+            for j in 0..num_polys {
                 matrix_polynomials[j].heighten();
             }
+            eq_matrix_polynomial.heighten();
         }
     }
 }
