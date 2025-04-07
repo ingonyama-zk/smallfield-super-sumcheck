@@ -25,6 +25,10 @@ pub enum AlgorithmType {
     WitnessChallengeSeparation,
     Precomputation,
     ToomCook,
+    NaiveWithEq,
+    WitnessChallengeSeparationWithEq,
+    PrecomputationWithEq,
+    ToomCookWithEq,
 }
 
 /// Prover State
@@ -61,6 +65,25 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         // sanity check 1: no polynomials case must not be allowed.
         if polynomials.len() == 0 {
             panic!("Cannot prove empty input polynomials.")
+        }
+
+        // sanity check 2: degree is consistent with the number of polynomials.
+        if algorithm == AlgorithmType::PrecomputationWithEq
+            || algorithm == AlgorithmType::ToomCookWithEq
+            || algorithm == AlgorithmType::NaiveWithEq
+            || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq
+        {
+            assert_eq!(
+                sumcheck_poly_degree,
+                polynomials.len() + 1,
+                "Degree of the sumcheck polynomial does not match number of polynomials, maybe you did not consider the equality polynomial."
+            );
+        } else {
+            assert_eq!(
+                sumcheck_poly_degree,
+                polynomials.len(),
+                "Degree of the sumcheck polynomial does not match number of polynomials."
+            );
         }
 
         // sanity check 2: all polynomial evaluations must be of the same size.
@@ -121,7 +144,8 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         add_ee: &AEE,
         mult_ee: &EE,
         mult_bb: &BB,
-        round_t: Option<usize>,
+        round_small_val: Option<usize>,
+        eq_challenges: Option<&Vec<EF>>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF>>>,
         mappings_int: Option<&Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
@@ -150,11 +174,25 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             .map(|_| vec![EF::zero(); r_degree + 1])
             .collect();
 
+        // Check if eq challenges length is equal to the number of variables
+        if let Some(eq_challenges) = eq_challenges {
+            assert!(
+                prover_state.algo == AlgorithmType::NaiveWithEq
+                    || prover_state.algo == AlgorithmType::PrecomputationWithEq
+                    || prover_state.algo == AlgorithmType::ToomCookWithEq
+                    || prover_state.algo == AlgorithmType::WitnessChallengeSeparationWithEq,
+                "Eq challenges are only allowed for algorithms with Eq"
+            );
+            assert_eq!(eq_challenges.len(), prover_state.num_vars);
+        }
+
         // Extract threshold round
-        let round_threshold = match round_t {
+        let num_round_small_val = match round_small_val {
             Some(t_value) => {
                 if (prover_state.algo == AlgorithmType::Precomputation)
                     || (prover_state.algo == AlgorithmType::ToomCook)
+                    || (prover_state.algo == AlgorithmType::PrecomputationWithEq)
+                    || (prover_state.algo == AlgorithmType::ToomCookWithEq)
                 {
                     assert!(t_value <= prover_state.num_vars);
                     t_value
@@ -190,7 +228,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     prover_state,
                     transcript,
                     &mut r_polys,
-                    round_threshold,
+                    num_round_small_val,
                     mult_be,
                     mult_ee,
                     mult_bb,
@@ -201,7 +239,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 prover_state,
                 transcript,
                 &mut r_polys,
-                round_threshold,
+                num_round_small_val,
                 mult_be,
                 mult_ee,
                 mult_bb,
@@ -212,6 +250,57 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 interpolation_maps_ef.unwrap(),
                 ef_combine_function,
             ),
+            AlgorithmType::NaiveWithEq => Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
+                prover_state,
+                &ef_combine_function,
+                transcript,
+                &mut r_polys,
+                eq_challenges.unwrap(),
+                to_ef,
+            ),
+            AlgorithmType::WitnessChallengeSeparationWithEq => {
+                Self::prove_with_eq_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
+                    prover_state,
+                    &bf_combine_function,
+                    transcript,
+                    &mut r_polys,
+                    eq_challenges.unwrap(),
+                    mult_be,
+                    &add_ee,
+                    &mult_ee,
+                )
+            }
+            AlgorithmType::PrecomputationWithEq => {
+                Self::prove_with_eq_precomputation_agorithm::<BE, EE, BB, EC>(
+                    prover_state,
+                    transcript,
+                    &mut r_polys,
+                    &eq_challenges.unwrap(),
+                    num_round_small_val,
+                    mult_be,
+                    mult_ee,
+                    mult_bb,
+                    ef_combine_function,
+                )
+            }
+            AlgorithmType::ToomCookWithEq => {
+                Self::prove_with_eq_toom_cook_agorithm::<BE, EE, BB, EC>(
+                    prover_state,
+                    transcript,
+                    &mut r_polys,
+                    &eq_challenges.unwrap(),
+                    num_round_small_val,
+                    mult_be,
+                    mult_ee,
+                    mult_bb,
+                    mappings.unwrap(),
+                    mappings_int.unwrap(),
+                    projection_mapping_indices.unwrap(),
+                    interpolation_maps_bf.unwrap(),
+                    interpolation_maps_ef.unwrap(),
+                    ef_combine_function,
+                )
+            }
         }
 
         SumcheckProof {

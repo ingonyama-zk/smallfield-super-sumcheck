@@ -85,8 +85,8 @@ mod fq_tests {
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>, u128) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
-        let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone(), witness_type);
+        let (mut prover_state, claimed_sum, eq_challenges): (ProverState<EF, BF>, EF, Option<_>) =
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), witness_type, &to_ef);
 
         let (
             emaps_base,
@@ -96,6 +96,16 @@ mod fq_tests {
             imaps_ext,
             mut scaled_det,
         ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
+
+        if eq_challenges.is_some() {
+            assert!(
+                algorithm == AlgorithmType::PrecomputationWithEq
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                    || algorithm == AlgorithmType::NaiveWithEq
+                    || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq,
+                "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
+            );
+        }
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -111,6 +121,7 @@ mod fq_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
+            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&emaps_base_int),
             Some(&projective_map_indices),
@@ -120,7 +131,9 @@ mod fq_tests {
         let elapsed = start.elapsed().as_millis();
 
         let mut round_t_v = round_t;
-        if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
+        if !(algorithm == AlgorithmType::ToomCook || algorithm == AlgorithmType::ToomCookWithEq)
+            || (with_inversions == true)
+        {
             scaled_det = 1;
             round_t_v = 0;
         }
@@ -179,6 +192,51 @@ mod fq_tests {
         println!(
             "{},{},{},{:.2?},{:.2?},{:.2?}",
             nv, degree, round_t, elapsed_1, elapsed_3, elapsed_4,
+        );
+    }
+
+    #[rstest]
+    fn check_sumcheck_product_eq_with_threshold(
+        #[values(16, 18, 20, 22, 24, 26)] nv: usize,
+        #[values(2, 3)] degree: usize,
+        #[values(1, 2, 3, 4)] round_t: usize,
+        #[values(WitnessType::U8)] witness_type: WitnessType,
+    ) {
+        // Run with command:
+        // cargo test bn254 --release -- --nocapture | grep -v "ok"
+        let (_, result_1_eq, elapsed_1_eq) = sumcheck_test_helper(
+            nv,
+            degree,
+            round_t,
+            AlgorithmType::NaiveWithEq,
+            false,
+            witness_type,
+        );
+        assert_eq!(result_1_eq.unwrap(), true);
+
+        let (_, result_3_eq, elapsed_3_eq) = sumcheck_test_helper(
+            nv,
+            degree,
+            round_t,
+            AlgorithmType::PrecomputationWithEq,
+            false,
+            witness_type,
+        );
+        assert_eq!(result_3_eq.unwrap(), true);
+
+        let (_, result_4_eq, elapsed_4_eq) = sumcheck_test_helper(
+            nv,
+            degree,
+            round_t,
+            AlgorithmType::ToomCookWithEq,
+            false,
+            witness_type,
+        );
+        assert_eq!(result_4_eq.unwrap(), true);
+
+        println!(
+            "{},{},{},{:.2?},{:.2?},{:.2?}",
+            nv, degree, round_t, elapsed_1_eq, elapsed_3_eq, elapsed_4_eq,
         );
     }
 }

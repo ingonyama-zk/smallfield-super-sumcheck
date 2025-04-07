@@ -13,6 +13,7 @@ pub mod test_helpers {
 
     use crate::{
         data_structures::LinearLagrangeList,
+        eq_poly::EqPoly,
         prover::{AlgorithmType, ProverState},
         IPForMLSumcheck,
     };
@@ -39,12 +40,16 @@ pub mod test_helpers {
     }
 
     /// Helper function to create sumcheck test multivariate polynomials of given degree.
-    pub fn create_sumcheck_test_data<EF: Field, BF: PrimeField>(
+    pub fn create_sumcheck_test_data<EF: Field, BF: PrimeField, T>(
         nv: usize,
         degree: usize,
         algorithm: AlgorithmType,
         witness_type: WitnessType,
-    ) -> (ProverState<EF, BF>, BF) {
+        to_ef: &T,
+    ) -> (ProverState<EF, BF>, EF, Option<Vec<EF>>)
+    where
+        T: Fn(&BF) -> EF + Sync,
+    {
         let num_evaluations: usize = (1 as usize) << nv;
         let mut polynomials: Vec<LinearLagrangeList<BF>> = Vec::with_capacity(degree);
         let mut polynomials_int: Vec<Vec<i64>> = Vec::with_capacity(degree);
@@ -64,18 +69,42 @@ pub mod test_helpers {
                 .zip(poly_i.iter())
                 .for_each(|(p_acc, p_curr)| *p_acc *= *p_curr);
         }
-        let claimed_sum: BF = polynomial_hadamard
-            .iter()
-            .fold(BF::zero(), |acc, ph| acc + ph);
 
+        let mut polynomial_hadamard_ef = polynomial_hadamard
+            .into_iter()
+            .map(|x| to_ef(&x))
+            .collect::<Vec<EF>>();
+
+        let is_algo_with_eq_poly = algorithm == AlgorithmType::PrecomputationWithEq
+            || algorithm == AlgorithmType::ToomCookWithEq
+            || algorithm == AlgorithmType::NaiveWithEq
+            || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq;
+        let eq_challenges = if is_algo_with_eq_poly {
+            let mut rng = rand::thread_rng();
+            let eq_challenges = (0..nv).map(|_| EF::rand(&mut rng)).collect::<Vec<EF>>();
+            let eq_challenges_evals = EqPoly::new(eq_challenges.clone()).compute_evals(false);
+            polynomial_hadamard_ef
+                .iter_mut()
+                .zip(eq_challenges_evals.iter())
+                .for_each(|(p_acc, p_curr)| *p_acc *= *p_curr);
+            Some(eq_challenges)
+        } else {
+            None
+        };
+
+        let claimed_sum: EF = polynomial_hadamard_ef
+            .iter()
+            .fold(EF::zero(), |acc, ph| acc + ph.clone());
+
+        let sumcheck_degree = is_algo_with_eq_poly.then(|| degree + 1).unwrap_or(degree);
         let prover_state: ProverState<EF, BF> = IPForMLSumcheck::<EF, BF>::prover_init(
             &polynomials,
             &polynomials_int,
-            degree,
+            sumcheck_degree,
             algorithm,
         );
 
-        (prover_state, claimed_sum)
+        (prover_state, claimed_sum, eq_challenges)
     }
 
     /// Computes n!

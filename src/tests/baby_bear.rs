@@ -105,8 +105,8 @@ mod fq4_tests {
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
-        let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
+        let (mut prover_state, claimed_sum, _): (ProverState<EF, BF>, EF, Option<_>) =
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1, &to_ef);
 
         let (
             emaps_base,
@@ -130,6 +130,7 @@ mod fq4_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
+            None,
             Some(&emaps_base),
             Some(&emaps_base_int),
             Some(&projective_map_indices),
@@ -147,7 +148,7 @@ mod fq4_tests {
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
+            claimed_sum,
             &proof,
             &mut verifier_transcript,
             algorithm,

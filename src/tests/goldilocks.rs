@@ -87,8 +87,8 @@ mod fq2_tests {
     ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
-        let (mut prover_state, claimed_sum): (ProverState<EF, BF>, BF) =
-            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1);
+        let (mut prover_state, claimed_sum, eq_challenges): (ProverState<EF, BF>, EF, Option<_>) =
+            create_sumcheck_test_data(nv, degree, algorithm.clone(), WitnessType::U1, &to_ef);
 
         let (
             emaps_base,
@@ -98,6 +98,16 @@ mod fq2_tests {
             imaps_ext,
             mut scaled_det,
         ) = common_setup_for_toom_cook::<BF, EF>(degree, with_inversions);
+
+        if eq_challenges.is_some() {
+            assert!(
+                algorithm == AlgorithmType::PrecomputationWithEq
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                    || algorithm == AlgorithmType::NaiveWithEq
+                    || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq,
+                "Eq challenges are generated only for algorithm 3/4 with eq polynomial."
+            );
+        }
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -112,6 +122,7 @@ mod fq2_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
+            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&emaps_base_int),
             Some(&projective_map_indices),
@@ -120,14 +131,16 @@ mod fq2_tests {
         );
 
         let mut round_t_v = round_t;
-        if (algorithm != AlgorithmType::ToomCook) || (with_inversions == true) {
+        if !(algorithm == AlgorithmType::ToomCook || algorithm == AlgorithmType::ToomCookWithEq)
+            || (with_inversions == true)
+        {
             scaled_det = 1;
             round_t_v = 0;
         }
 
         let mut verifier_transcript = Transcript::new(b"test_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
+            claimed_sum,
             &proof,
             &mut verifier_transcript,
             algorithm,
@@ -159,6 +172,27 @@ mod fq2_tests {
     }
 
     #[rstest]
+    fn check_sumcheck_product_with_eq(
+        #[values(5, 8, 12)] nv: usize,
+        #[values(1, 2, 3, 6)] degree: usize,
+        #[values(
+            AlgorithmType::NaiveWithEq,
+            AlgorithmType::WitnessChallengeSeparationWithEq,
+            AlgorithmType::PrecomputationWithEq,
+            AlgorithmType::ToomCookWithEq
+        )]
+        algorithm: AlgorithmType,
+    ) {
+        assert_eq!(
+            // Runs memory-heavy algorithm 3 and 4 only for first three rounds.
+            sumcheck_test_helper(nv, degree, 2, algorithm, false)
+                .1
+                .unwrap(),
+            true
+        );
+    }
+
+    #[rstest]
     fn check_sumcheck_product_with_threshold(
         #[values(5, 8)] nv: usize,
         #[values(2, 3)] degree: usize,
@@ -168,6 +202,27 @@ mod fq2_tests {
             AlgorithmType::WitnessChallengeSeparation,
             AlgorithmType::Precomputation,
             AlgorithmType::ToomCook
+        )]
+        algorithm: AlgorithmType,
+    ) {
+        assert_eq!(
+            sumcheck_test_helper(nv, degree, round_t, algorithm, false)
+                .1
+                .unwrap(),
+            true
+        );
+    }
+
+    #[rstest]
+    fn check_sumcheck_product_with_threshold_with_eq(
+        #[values(5, 8)] nv: usize,
+        #[values(2, 3)] degree: usize,
+        #[values(2, nv / 2)] round_t: usize, // t ≤ n/2
+        #[values(
+            AlgorithmType::NaiveWithEq,
+            AlgorithmType::WitnessChallengeSeparationWithEq,
+            AlgorithmType::PrecomputationWithEq,
+            AlgorithmType::ToomCookWithEq
         )]
         algorithm: AlgorithmType,
     ) {
