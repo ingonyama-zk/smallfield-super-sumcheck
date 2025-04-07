@@ -9,10 +9,11 @@ use crate::IPForMLSumcheck;
 use rayon::prelude::*;
 
 impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
-    /// Computes the round polynomial using the algorithm 1 (collapsing arrays) from the paper
-    /// https://github.com/ingonyama-zk/papers/blob/main/sumcheck_201_chapter_1.pdf
-    ///
-    /// Outputs the challenge (which is an extension field element).
+    /// Computes the round polynomial using the algorithm 1 (collapsing arrays) where
+    /// the polynomial is of the form `eq_polynomial * state_polynomial_1 * ... * state_polynomial_d`
+    /// This algorithm does **not** use any optimization for `eq_polynomial`
+    /// (either Gruen's optimization or our split eq-poly optimization).
+    /// This version parallelizes the computation of contributions across different `i` values.
     pub fn compute_round_polynomial_with_eq<C, F>(
         round_number: usize,
         state_polynomials: &Vec<LinearLagrangeList<F>>,
@@ -24,44 +25,75 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     ) -> EF
     where
         C: Fn(&Vec<F>) -> EF + Sync,
-        F: TowerField,
+        F: TowerField + Sync,
+        EF: Send + Sync,
     {
         let state_polynomial_len = state_polynomials[0].list.len();
 
-        // Parallel computation of contributions
-        let computed_contributions: Vec<Vec<EF>> = (0..=round_polynomial_degree)
+        // Define the identity element for the reduction (a vector of zeros)
+        let identity_vec = vec![EF::zero(); round_polynomial_degree + 1];
+
+        // Parallel computation of contributions using map-reduce
+        let summed_contributions = (0..state_polynomial_len)
             .into_par_iter()
-            .map(|k| {
-                // For each `k`, collect contributions from all state polynomials
-                let mut contributions = vec![EF::zero(); state_polynomial_len];
-                for i in 0..state_polynomial_len {
-                    let evaluations_at_k: Vec<F> = state_polynomials
-                        .iter()
-                        .map(|state_poly| {
-                            let o = state_poly.list[i].odd;
-                            let e = state_poly.list[i].even;
-                            let k_field = F::new(k as u128, None);
-                            (F::one() - k_field) * e + k_field * o
-                        })
-                        .collect();
+            .map(|i| {
+                // For each `i`, compute the contribution vector [s_i(0), s_i(1), ..., s_i(degree)]
+                let mut contributions = vec![EF::zero(); round_polynomial_degree + 1];
+                let mut evals_at_0: Vec<F> = Vec::with_capacity(round_polynomial_degree);
+                let mut evals_at_1: Vec<F> = Vec::with_capacity(round_polynomial_degree);
+                let mut evals_at_infty: Vec<F> = Vec::with_capacity(round_polynomial_degree);
 
-                    let k_field = EF::new(k as u128, None);
-                    let eq_evaluation_at_k = (EF::one() - k_field) * eq_polynomial.list[i].even
-                        + k_field * eq_polynomial.list[i].odd;
-
-                    // Apply combine function
-                    contributions[i] = eq_evaluation_at_k * combine_function(&evaluations_at_k);
+                // Precompute evaluations for state polynomials at 0, 1, and infinity
+                for k in 0..round_polynomial_degree {
+                    let even_val = state_polynomials[k].list[i].even;
+                    let odd_val = state_polynomials[k].list[i].odd;
+                    evals_at_0.push(even_val);
+                    evals_at_1.push(odd_val);
+                    evals_at_infty.push(odd_val - even_val);
                 }
-                contributions
-            })
-            .collect();
 
-        // Now, sequentially merge the computed contributions into round_polynomials
-        for (k, contributions) in computed_contributions.into_iter().enumerate() {
-            for contribution in contributions {
-                round_polynomials[round_number - 1][k] += contribution;
-            }
-        }
+                // Precompute evaluations for the eq polynomial at 0, 1, and infinity
+                let eq_eval_at_0 = eq_polynomial.list[i].even;
+                let eq_eval_at_1 = eq_polynomial.list[i].odd;
+                let eq_eval_at_infty = eq_eval_at_1 - eq_eval_at_0;
+
+                // Compute s_i(0) = eq(0) * combine(evals_at_0)
+                contributions[0] = eq_eval_at_0 * combine_function(&evals_at_0);
+
+                // Compute s_i(1) = eq(1) * combine(evals_at_1)
+                contributions[1] = eq_eval_at_1 * combine_function(&evals_at_1);
+
+                // Re-use evals_at_1 vector and track eq_eval_at_u
+                let mut evals_at_u = evals_at_1;
+                let mut eq_eval_at_u = eq_eval_at_1;
+
+                // Compute s_i(u) = eq(u) * combine(evals_at_u) for u = 2 to round_polynomial_degree
+                for u in 2..=round_polynomial_degree {
+                    // Update state polynomial evaluations for point u
+                    for k in 0..round_polynomial_degree {
+                        evals_at_u[k] += evals_at_infty[k];
+                    }
+                    // Update eq polynomial evaluation for point u
+                    eq_eval_at_u += eq_eval_at_infty;
+
+                    contributions[u] = eq_eval_at_u * combine_function(&evals_at_u);
+                }
+                contributions // Return the contribution vector for this `i`
+            })
+            .reduce(
+                || identity_vec.clone(), // Provide a fresh identity vector for each thread
+                |mut vec_a, vec_b| {
+                    // Reduction step: Sum the contribution vectors element-wise
+                    for (a, b) in vec_a.iter_mut().zip(vec_b.iter()) {
+                        *a += *b;
+                    }
+                    vec_a
+                },
+            );
+
+        // Assign the final summed contributions to the corresponding round polynomial.
+        // This handles the case where state_polynomial_len is 0, as reduce returns the identity.
+        round_polynomials[round_number - 1] = summed_contributions;
 
         // append the round polynomial (i.e. prover message) to the transcript
         <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
@@ -93,6 +125,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EC: Fn(&Vec<EF>) -> EF + Sync,
         BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
+        BF: Send + Sync,
+        EF: Send + Sync,
     {
         // Compute the equality polynomial from its basis.
         let eq_poly = EqPoly::new(eq_challenges.to_vec());
@@ -106,9 +140,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // field polynomials with the extension field eq polynomial. So we copy all of the prover state polynomials
         // to a new data structure of extension field elements. This is because all of the data would be folded
         // using a challenge (an extension field element). So we update the prover state polynomials as follows.
+        // Parallelize conversion
         let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = prover_state
             .state_polynomials
-            .iter()
+            .par_iter()
             .map(|list| list.convert(&to_ef))
             .collect();
 
@@ -124,11 +159,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 transcript,
             );
 
-            // update the state polynomials
-            for j in 0..ef_state_polynomials.len() {
-                ef_state_polynomials[j].fold_in_half(alpha);
-            }
-            eq_state_poly.fold_in_half(alpha);
+            // update the state polynomials and eq polynomial in parallel
+            ef_state_polynomials
+                .par_iter_mut()
+                .for_each(|poly| poly.fold_in_half(alpha));
+            eq_state_poly.fold_in_half(alpha); // eq_state_poly fold is usually fast, might not need parallelization itself
         }
     }
 }
