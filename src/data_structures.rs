@@ -230,19 +230,41 @@ impl<F: Field> LinearLagrangeList<F> {
     }
 
     /// Folds a linear lagrange list in half according to the sumcheck protocol
+    /// It computes L_i' = { even: L_i(challenge), odd: L_{i+n/2}(challenge) }
+    /// where L_k(x) = L_k.even * (1 - x) + L_k.odd * x
     pub fn fold_in_half(self: &mut LinearLagrangeList<F>, challenge: F) {
-        assert_ne!(self.size, 0);
-        for linear_lagrange_instance in &mut self.list {
-            linear_lagrange_instance.even *= F::one() - challenge;
-            linear_lagrange_instance.odd *= challenge;
-            linear_lagrange_instance.even += linear_lagrange_instance.odd;
-        }
+        assert_ne!(self.size, 0, "Cannot fold an empty list.");
+        assert!(
+            self.size.is_power_of_two(),
+            "List size must be a power of two for folding."
+        );
 
-        for i in 0..(self.size / 2) {
-            self.list[i].odd = self.list[i + self.size / 2].even;
-        }
-        self.size /= 2;
-        self.list.truncate(self.size);
+        let half_size = self.size / 2;
+
+        // Split the list into two mutable halves. This is safe because the parallel zip ensures
+        // we access distinct elements (first_half[i] and second_half[i]).
+        let (first_half, second_half) = self.list.split_at_mut(half_size);
+
+        // Process pairs in parallel
+        first_half
+            .par_iter_mut()
+            .zip(second_half.par_iter()) // Immutable borrow for the second half is sufficient
+            .for_each(|(target_ll, source_ll)| {
+                // Calculate L_i(challenge) using the optimized form: e + chal * (o - e)
+                // This saves one multiplication compared to (1-chal)*e + chal*o
+                let new_even = target_ll.even + challenge * (target_ll.odd - target_ll.even);
+
+                // Calculate L_{i+n/2}(challenge)
+                let new_odd = source_ll.even + challenge * (source_ll.odd - source_ll.even);
+
+                // Update the target element which will remain in the list
+                target_ll.even = new_even;
+                target_ll.odd = new_odd;
+            });
+
+        // Truncate the list to the new size
+        self.list.truncate(half_size);
+        self.size = half_size;
     }
 
     // Takes a structure and generates a new structure half the size (to add conditions)
