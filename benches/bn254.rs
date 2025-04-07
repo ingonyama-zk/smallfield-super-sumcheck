@@ -7,7 +7,6 @@ use ark_ff::Field;
 use ark_std::iterable::Iterable;
 use ark_std::vec::Vec;
 use criterion::Criterion;
-use smallfield_sumcheck::prover::AlgorithmType;
 
 mod bench_helpers;
 use bench_helpers::*;
@@ -63,15 +62,19 @@ pub fn create_primitive_functions() -> PrimitiveFunctions<EF, BF> {
 }
 
 fn bench_bn254(c: &mut Criterion) {
+    // Read environment variables for configuration
+    let (algo, degree, round_t, nv_range) = read_env_variables();
+
     let primitive_functions = create_primitive_functions();
 
     sumcheck_prove_bench(
         c,
-        4, // degree
-        6, // round_t
-        AlgorithmType::ToomCook,
+        degree,
+        round_t,
+        algo,
         false, // with_inversions
         &primitive_functions,
+        nv_range,
     );
 }
 

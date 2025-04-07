@@ -7,6 +7,50 @@ use smallfield_sumcheck::{
     IPForMLSumcheck,
 };
 
+pub fn read_env_variables() -> (AlgorithmType, usize, usize, Vec<usize>) {
+    // Read algorithm type from environment variable, default to "4eq"
+    let algo = match std::env::var("ALGO")
+        .unwrap_or("4eq".to_string())
+        .to_lowercase()
+        .as_str()
+    {
+        "1" => AlgorithmType::Naive,
+        "1eq" => AlgorithmType::NaiveWithEq,
+        "2" => AlgorithmType::Precomputation,
+        "2eq" => AlgorithmType::PrecomputationWithEq,
+        "3" => AlgorithmType::Precomputation,
+        "3eq" => AlgorithmType::PrecomputationWithEq,
+        "4" => AlgorithmType::ToomCook,
+        "4eq" => AlgorithmType::ToomCookWithEq,
+        invalid => {
+            panic!(
+                "Invalid algorithm type: {}. Valid options are: 1, 1eq, 2, 2eq, 3, 3eq, 4, 4eq.",
+                invalid
+            )
+        }
+    };
+
+    // Read degree from environment variable, default to 2
+    let degree = std::env::var("DEG")
+        .unwrap_or("2".to_string())
+        .parse()
+        .unwrap_or(2);
+
+    // Read round_t from environment variable, default to 3
+    let round_t = std::env::var("ROUND_T")
+        .unwrap_or("3".to_string())
+        .parse()
+        .unwrap_or(3);
+
+    // Read nv_range from environment variable, default to "14,16,18,20"
+    let nv_range: Vec<usize> = std::env::var("NV_RANGE")
+        .unwrap_or("14,16,18,20".to_string())
+        .split(',')
+        .map(|s| s.parse().unwrap_or(14))
+        .collect();
+    (algo, degree, round_t, nv_range)
+}
+
 pub struct PrimitiveFunctions<EF: Field, BF: PrimeField> {
     pub to_ef: Box<dyn Fn(&BF) -> EF + Sync>,
     pub combine_ef: Box<dyn Fn(&Vec<EF>) -> EF + Sync>,
@@ -30,10 +74,6 @@ pub struct ProverInputs<'a, EF: Field, BF: PrimeField> {
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
 }
 
-pub const NUM_VARIABLES_RANGE: [usize; 5] = [16, 18, 20, 22, 24];
-
-
-
 pub fn sumcheck_prove_bench<EF: Field, BF: PrimeField>(
     c: &mut Criterion,
     degree: usize,
@@ -41,9 +81,10 @@ pub fn sumcheck_prove_bench<EF: Field, BF: PrimeField>(
     algorithm: AlgorithmType,
     with_inversions: bool,
     primitive_functions: &PrimitiveFunctions<EF, BF>,
+    nv_range: Vec<usize>
 ) {
     let mut group = c.benchmark_group("Prove");
-    for nv in NUM_VARIABLES_RANGE {
+    for nv in nv_range {
         group.significance_level(0.05).sample_size(10);
         let function_name = format!(
             "Algorithm/{:?}/Degree/{}/round_t: {}",
@@ -60,7 +101,7 @@ pub fn sumcheck_prove_bench<EF: Field, BF: PrimeField>(
                                 nv,
                                 degree,
                                 algorithm.clone(),
-                                WitnessType::U1,
+                                WitnessType::U32,
                                 &primitive_functions.to_ef,
                             );
                         let (
