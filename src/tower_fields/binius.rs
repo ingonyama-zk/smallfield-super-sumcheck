@@ -14,6 +14,27 @@ use super::TowerField;
 /// Invserse of 0 should throw an error.
 const F2_4_INVERSE: [u128; 15] = [1, 3, 2, 6, 14, 4, 15, 13, 10, 9, 12, 11, 8, 5, 7];
 
+/// Precomputed multiplication table for GF(16) (Level 2)
+/// `GF16_MULT_TABLE[a][b]` gives a * b in GF(16).
+const GF16_MULT_TABLE: [[u8; 16]; 16] = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    [0, 2, 3, 1, 8, 10, 11, 9, 12, 14, 15, 13, 4, 6, 7, 5],
+    [0, 3, 1, 2, 12, 15, 13, 14, 4, 7, 5, 6, 8, 11, 9, 10],
+    [0, 4, 8, 12, 9, 13, 1, 5, 14, 10, 6, 2, 7, 3, 15, 11],
+    [0, 5, 10, 15, 13, 8, 7, 2, 6, 3, 12, 9, 11, 14, 1, 4],
+    [0, 6, 11, 13, 1, 7, 10, 12, 2, 4, 9, 15, 3, 5, 8, 14],
+    [0, 7, 9, 14, 5, 2, 12, 11, 10, 13, 3, 4, 15, 8, 6, 1],
+    [0, 8, 12, 4, 14, 6, 2, 10, 7, 15, 11, 3, 9, 1, 5, 13],
+    [0, 9, 14, 7, 10, 3, 4, 13, 15, 6, 1, 8, 5, 12, 11, 2],
+    [0, 10, 15, 5, 6, 12, 9, 3, 11, 1, 4, 14, 13, 7, 2, 8],
+    [0, 11, 13, 6, 2, 9, 15, 4, 3, 8, 14, 5, 1, 10, 12, 7],
+    [0, 12, 4, 8, 7, 11, 3, 15, 9, 5, 13, 1, 14, 2, 10, 6],
+    [0, 13, 6, 11, 3, 14, 5, 8, 1, 12, 7, 10, 2, 15, 4, 9],
+    [0, 14, 7, 9, 15, 1, 8, 6, 5, 11, 2, 12, 10, 4, 13, 3],
+    [0, 15, 5, 10, 11, 4, 14, 1, 13, 2, 8, 7, 6, 9, 3, 12],
+];
+
 #[derive(Copy, Clone, Eq)]
 pub struct BiniusTowerField {
     val: u128,         // To store the value in the field
@@ -146,6 +167,7 @@ impl TowerField for BiniusTowerField {
 
     fn pow(&self, exp: u32) -> Self {
         let mut output = Self::one();
+        // Original simple iterative pow for BiniusTowerField
         for _ in 0..exp {
             output *= self.clone();
         }
@@ -703,3 +725,1056 @@ mod tests {
         assert!(debug_str.contains("num_bits"));
     }
 }
+
+#[cfg(test)]
+mod compare_implementations {
+    use super::BiniusLevel;
+    use super::{BiniusTowerField as LegacyBTF, OptimizedBiniusTowerField as OptBTF};
+    use crate::tower_fields::TowerField;
+    use num::Zero;
+    use rand::Rng;
+    use std::time::Instant;
+
+    const TEST_ITERATIONS: usize = 100;
+    const BENCH_ITERATIONS: usize = 1000;
+
+    // Helper to create corresponding fields
+    fn create_pair(val: u128, level: usize) -> (LegacyBTF, OptBTF) {
+        (
+            LegacyBTF::new(val, Some(level)),
+            OptBTF::new(val, Some(level)),
+        )
+    }
+
+    // Helper to assert equivalence
+    fn assert_equivalent(legacy: &LegacyBTF, opt: &OptBTF, context: &str) {
+        assert_eq!(
+            legacy.get_val(),
+            opt.get_val(),
+            "Value mismatch in {}",
+            context
+        );
+        // Legacy uses num_levels, Opt uses level enum
+        assert_eq!(
+            legacy.num_levels, opt.level as usize,
+            "Level mismatch in {}",
+            context
+        );
+        // Check optimized validity
+        assert!(
+            opt.is_valid(),
+            "Optimized field is not valid in {}",
+            context
+        );
+    }
+
+    // Helper for random generation
+    fn rand_pair(level: usize) -> (LegacyBTF, OptBTF) {
+        let num_bits = 1 << level;
+        let val = if num_bits >= 128 {
+            rand::thread_rng().gen::<u128>()
+        } else {
+            let max_val = (1u128 << num_bits).saturating_sub(1);
+            rand::thread_rng().gen_range(0..=max_val)
+        };
+        create_pair(val, level)
+    }
+
+    #[test]
+    fn test_equivalence_init() {
+        for level in 0..=7 {
+            let (l, o) = create_pair(0, level);
+            assert_equivalent(&l, &o, "init zero");
+
+            let (l, o) = create_pair(1, level);
+            assert_equivalent(&l, &o, "init one");
+
+            let (l, o) = rand_pair(level);
+            assert_equivalent(&l, &o, "init random");
+        }
+    }
+
+    #[test]
+    fn test_equivalence_add() {
+        for level1 in 0..=7 {
+            for level2 in 0..=7 {
+                for _ in 0..TEST_ITERATIONS {
+                    let (l1, o1) = rand_pair(level1);
+                    let (l2, o2) = rand_pair(level2);
+
+                    let l_res = l1 + l2;
+                    let o_res = o1 + o2;
+
+                    assert_equivalent(&l_res, &o_res, "add result");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_equivalence_mul() {
+        for level1 in 2..=5 {
+            // Limit levels to keep test time reasonable
+            for level2 in 2..=5 {
+                for _ in 0..TEST_ITERATIONS {
+                    let (l1, o1) = rand_pair(level1);
+                    let (l2, o2) = rand_pair(level2);
+
+                    let l_res = l1 * l2;
+                    let o_res = o1 * o2;
+
+                    assert_equivalent(&l_res, &o_res, "mul result");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_equivalence_inverse() {
+        for level in 2..=5 {
+            // Limit levels
+            for _ in 0..TEST_ITERATIONS {
+                let (l1, o1) = rand_pair(level);
+
+                // Ensure non-zero for inverse
+                if l1.is_zero() {
+                    continue;
+                }
+                assert!(!o1.is_zero());
+
+                let l_inv = l1.inverse();
+                let o_inv = o1.inverse();
+
+                match (l_inv, o_inv) {
+                    (Some(li), Some(oi)) => assert_equivalent(&li, &oi, "inverse result"),
+                    (None, None) => { /* Both correctly return None (e.g., for 0) */ }
+                    _ => panic!("Inverse results differ (Some vs None) for level {}", level),
+                }
+            }
+        }
+        // Test zero explicitly
+        let (l0, o0) = create_pair(0, 3);
+        assert!(l0.inverse().is_none());
+        assert!(o0.inverse().is_none());
+    }
+
+    #[test]
+    fn test_equivalence_pow() {
+        for level in 2..=5 {
+            // Limit levels
+            for exp in [0, 1, 2, 5, 10].iter() {
+                for _ in 0..TEST_ITERATIONS {
+                    let (l1, o1) = rand_pair(level);
+
+                    let l_pow = l1.pow(*exp);
+                    let o_pow = o1.pow(*exp);
+
+                    assert_equivalent(&l_pow, &o_pow, &format!("pow exp {}", exp));
+                }
+            }
+        }
+    }
+
+    // --- Benchmarks ---
+
+    fn benchmark_op<FL, FO>(name: &str, level: usize, legacy_op: FL, opt_op: FO)
+    where
+        FL: Fn() -> (),
+        FO: Fn() -> (),
+    {
+        // Warm-up (optional, can help stabilize)
+        // for _ in 0..10 { legacy_op(); opt_op(); }
+
+        let start_legacy = Instant::now();
+        for _ in 0..BENCH_ITERATIONS {
+            legacy_op();
+        }
+        let time_legacy = start_legacy.elapsed();
+
+        let start_opt = Instant::now();
+        for _ in 0..BENCH_ITERATIONS {
+            opt_op();
+        }
+        let time_opt = start_opt.elapsed();
+
+        println!(
+            "Bench L{}: {:<10} | Legacy: {:>10.2?} | Optimized: {:>10.2?}",
+            level,
+            name,
+            time_legacy / BENCH_ITERATIONS as u32,
+            time_opt / BENCH_ITERATIONS as u32
+        );
+    }
+
+    #[test]
+    fn benchmark_level_3() {
+        println!(
+            "\n--- Benchmarking Level 3 ({} iterations) ---",
+            BENCH_ITERATIONS
+        );
+        let level = 3;
+        let (l1, o1) = rand_pair(level);
+        let (l2, o2) = rand_pair(level);
+        let exp = 15u32;
+
+        benchmark_op(
+            "Add",
+            level,
+            || {
+                let _ = l1 + l2;
+            },
+            || {
+                let _ = o1 + o2;
+            },
+        );
+        benchmark_op(
+            "Mul",
+            level,
+            || {
+                let _ = l1 * l2;
+            },
+            || {
+                let _ = o1 * o2;
+            },
+        );
+        benchmark_op(
+            "Inverse",
+            level,
+            || {
+                let _ = l1.inverse();
+            },
+            || {
+                let _ = o1.inverse();
+            },
+        );
+        benchmark_op(
+            "Pow",
+            level,
+            || {
+                let _ = l1.pow(exp);
+            },
+            || {
+                let _ = o1.pow(exp);
+            },
+        );
+    }
+
+    #[test]
+    fn benchmark_level_5() {
+        println!(
+            "\n--- Benchmarking Level 5 ({} iterations) ---",
+            BENCH_ITERATIONS
+        );
+        let level = 5;
+        let (l1, o1) = rand_pair(level);
+        let (l2, o2) = rand_pair(level);
+        let exp = 30u32;
+
+        benchmark_op(
+            "Add",
+            level,
+            || {
+                let _ = l1 + l2;
+            },
+            || {
+                let _ = o1 + o2;
+            },
+        );
+        benchmark_op(
+            "Mul",
+            level,
+            || {
+                let _ = l1 * l2;
+            },
+            || {
+                let _ = o1 * o2;
+            },
+        );
+        benchmark_op(
+            "Inverse",
+            level,
+            || {
+                let _ = l1.inverse();
+            },
+            || {
+                let _ = o1.inverse();
+            },
+        );
+        benchmark_op(
+            "Pow",
+            level,
+            || {
+                let _ = l1.pow(exp);
+            },
+            || {
+                let _ = o1.pow(exp);
+            },
+        );
+    }
+
+    #[test]
+    fn benchmark_level_7() {
+        println!(
+            "\n--- Benchmarking Level 7 ({} iterations) ---",
+            BENCH_ITERATIONS
+        );
+        let level = 7;
+        let (l1, o1) = rand_pair(level);
+        let (l2, o2) = rand_pair(level);
+        let exp = 50u32;
+
+        benchmark_op(
+            "Add",
+            level,
+            || {
+                let _ = l1 + l2;
+            },
+            || {
+                let _ = o1 + o2;
+            },
+        );
+        benchmark_op(
+            "Mul",
+            level,
+            || {
+                let _ = l1 * l2;
+            },
+            || {
+                let _ = o1 * o2;
+            },
+        );
+        benchmark_op(
+            "Inverse",
+            level,
+            || {
+                let _ = l1.inverse();
+            },
+            || {
+                let _ = o1.inverse();
+            },
+        );
+        benchmark_op(
+            "Pow",
+            level,
+            || {
+                let _ = l1.pow(exp);
+            },
+            || {
+                let _ = o1.pow(exp);
+            },
+        );
+    }
+
+    #[test]
+    #[ignore] // Only run this manually to generate the table
+    fn test_generate_gf16_mult_table() {
+        let level = 2;
+        let mut table = [[0u8; 16]; 16]; // Changed to 2D array
+        println!("Generating GF(16) Multiplication Table ({}x{})...", 16, 16);
+
+        for a_val in 0u8..=15 {
+            for b_val in 0u8..=15 {
+                let a = OptBTF::new(a_val as u128, Some(level));
+                let b = OptBTF::new(b_val as u128, Some(level));
+
+                let result = a * b;
+
+                // Verify result is L2 and fits in u8
+                assert_eq!(
+                    result.level,
+                    BiniusLevel::L2,
+                    "Result level mismatch for {}*{}",
+                    a_val,
+                    b_val
+                );
+                assert!(result.is_valid(), "Result invalid for {}*{}", a_val, b_val);
+                let result_val = result.get_value_as_u8();
+
+                table[a_val as usize][b_val as usize] = result_val;
+            }
+        }
+
+        // Print the table in Rust const format
+        println!("\nconst GF16_MULT_TABLE: [[u8; 16]; 16] = ["); // Changed type in signature
+        for r in 0..16 {
+            print!("    ["); // Start of inner array
+            for c in 0..16 {
+                print!("{:3},", table[r][c]); // Index into 2D array
+            }
+            println!("],"); // End of inner array, add comma
+        }
+        println!("];");
+    }
+}
+
+// Proposed new structure for optimized Binius Tower Field representation
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
+pub enum BiniusLevel {
+    L0, // 1 bit (GF(2^1))   - fits in u8
+    L1, // 2 bits (GF(2^2))   - fits in u8
+    L2, // 4 bits (GF(2^4))   - fits in u8
+    L3, // 8 bits (GF(2^8))   - fits in u8
+    L4, // 16 bits (GF(2^16))  - fits in u16
+    L5, // 32 bits (GF(2^32))  - fits in u32
+    L6, // 64 bits (GF(2^64))  - fits in u64
+    L7, // 128 bits (GF(2^128)) - fits in u128
+}
+
+impl BiniusLevel {
+    /// Returns the number of bits required for this level.
+    pub fn num_bits(&self) -> usize {
+        1 << (*self as usize)
+    }
+
+    /// Creates a BiniusLevel from a level number (0-7).
+    pub fn from_level(level: usize) -> Option<Self> {
+        match level {
+            0 => Some(BiniusLevel::L0),
+            1 => Some(BiniusLevel::L1),
+            2 => Some(BiniusLevel::L2),
+            3 => Some(BiniusLevel::L3),
+            4 => Some(BiniusLevel::L4),
+            5 => Some(BiniusLevel::L5),
+            6 => Some(BiniusLevel::L6),
+            7 => Some(BiniusLevel::L7),
+            _ => None, // Invalid level
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum BiniusValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+}
+
+// TODO: Implement methods to easily get the value regardless of underlying type,
+// potentially converting to u128 when necessary for operations.
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct OptimizedBiniusTowerField {
+    level: BiniusLevel,
+    value: BiniusValue,
+}
+
+// TODO: Implement constructor, TowerField trait, and arithmetic operations
+// for OptimizedBiniusTowerField. This will involve matching on level/value variants
+// and potentially promoting values during operations.
+
+// Helper functions and implementations for OptimizedBiniusTowerField
+
+impl OptimizedBiniusTowerField {
+    /// Helper to get the value as u128, regardless of the internal storage type.
+    fn get_value_as_u128(&self) -> u128 {
+        match self.value {
+            BiniusValue::U8(v) => v as u128,
+            BiniusValue::U16(v) => v as u128,
+            BiniusValue::U32(v) => v as u128,
+            BiniusValue::U64(v) => v as u128,
+            BiniusValue::U128(v) => v,
+        }
+    }
+
+    /// Safely gets value as u64, casting smaller types up.
+    fn get_value_as_u64_safe(&self) -> u64 {
+        match self.value {
+            BiniusValue::U8(v) => v as u64,
+            BiniusValue::U16(v) => v as u64,
+            BiniusValue::U32(v) => v as u64,
+            BiniusValue::U64(v) => v,
+            BiniusValue::U128(v) => v as u64, // Note: Potential truncation if > u64::MAX, but logic should prevent this path
+        }
+    }
+
+    /// Safely gets value as u32, casting smaller types up.
+    fn get_value_as_u32_safe(&self) -> u32 {
+        match self.value {
+            BiniusValue::U8(v) => v as u32,
+            BiniusValue::U16(v) => v as u32,
+            BiniusValue::U32(v) => v,
+            BiniusValue::U64(v) => v as u32,
+            BiniusValue::U128(v) => v as u32,
+        }
+    }
+
+    /// Safely gets value as u16, casting smaller types up.
+    fn get_value_as_u16_safe(&self) -> u16 {
+        match self.value {
+            BiniusValue::U8(v) => v as u16,
+            BiniusValue::U16(v) => v,
+            BiniusValue::U32(v) => v as u16,
+            BiniusValue::U64(v) => v as u16,
+            BiniusValue::U128(v) => v as u16,
+        }
+    }
+
+    /// Safely gets value as u8, casting smaller types up (only U8 possible).
+    fn get_value_as_u8_safe(&self) -> u8 {
+        match self.value {
+            BiniusValue::U8(v) => v,
+            // Casts from larger types are inherently lossy and indicate a logic error elsewhere
+            _ => self.get_value_as_u128() as u8, // Fallback with potential truncation
+        }
+    }
+
+    /// Helper to get the value as u8. Panics if stored value is larger.
+    fn get_value_as_u8(&self) -> u8 {
+        match self.value {
+            BiniusValue::U8(v) => v,
+            // Casts from larger types are inherently lossy and indicate a logic error elsewhere
+            _ => self.get_value_as_u128() as u8, // Fallback with potential truncation
+        }
+    }
+
+    /// Helper to create the appropriate BiniusValue enum variant based on level and value.
+    /// Masks the value to fit the number of bits for the level.
+    fn create_value(val: u128, level: BiniusLevel) -> BiniusValue {
+        let num_bits = level.num_bits();
+        let modulus_mask = if num_bits >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << num_bits) - 1u128
+        };
+        let masked_val = val & modulus_mask;
+
+        match level {
+            BiniusLevel::L0 | BiniusLevel::L1 | BiniusLevel::L2 | BiniusLevel::L3 => {
+                BiniusValue::U8(masked_val as u8)
+            }
+            BiniusLevel::L4 => BiniusValue::U16(masked_val as u16),
+            BiniusLevel::L5 => BiniusValue::U32(masked_val as u32),
+            BiniusLevel::L6 => BiniusValue::U64(masked_val as u64),
+            BiniusLevel::L7 => BiniusValue::U128(masked_val),
+        }
+    }
+
+    /// Actual constructor logic.
+    fn construct(val: u128, level_opt: Option<usize>) -> Self {
+        let level_num = level_opt.unwrap_or_else(|| {
+            // Basic estimation based on bits needed - might need refinement
+            if val == 0 {
+                0
+            } else {
+                (128 - val.leading_zeros()).div_ceil(2) as usize
+            } // Rough log2(log2(val))
+            .min(7) // Cap at max level 7
+        });
+
+        let level = BiniusLevel::from_level(level_num)
+            .expect("Level calculation resulted in invalid level");
+
+        let value = Self::create_value(val, level);
+
+        OptimizedBiniusTowerField { level, value }
+    }
+
+    /// Checks if the internal value representation is consistent with the level.
+    pub fn is_valid(&self) -> bool {
+        match self.level {
+            BiniusLevel::L0 | BiniusLevel::L1 | BiniusLevel::L2 | BiniusLevel::L3 => {
+                matches!(self.value, BiniusValue::U8(_))
+            }
+            BiniusLevel::L4 => matches!(self.value, BiniusValue::U16(_)),
+            BiniusLevel::L5 => matches!(self.value, BiniusValue::U32(_)),
+            BiniusLevel::L6 => matches!(self.value, BiniusValue::U64(_)),
+            BiniusLevel::L7 => matches!(self.value, BiniusValue::U128(_)),
+        }
+    }
+}
+
+// --- Trait Implementations ---
+
+impl Zero for OptimizedBiniusTowerField {
+    fn zero() -> Self {
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L0, // Smallest level for zero
+            value: BiniusValue::U8(0),
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.get_value_as_u128() == 0
+    }
+}
+
+impl One for OptimizedBiniusTowerField {
+    fn one() -> Self {
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L0, // Smallest level for one
+            value: BiniusValue::U8(1),
+        }
+    }
+
+    fn is_one(&self) -> bool {
+        // Check level 0 and value 1 specifically
+        self.level == BiniusLevel::L0 && self.get_value_as_u128() == 1
+    }
+}
+
+impl AddAssign for OptimizedBiniusTowerField {
+    fn add_assign(&mut self, other: Self) {
+        // Optimized AddAssign to avoid create_value and use minimal types
+        // debug_assert!(self.is_valid());
+        // debug_assert!(other.is_valid());
+
+        let max_level = std::cmp::max(self.level, other.level);
+
+        // Perform XOR using the minimal required type based on max_level
+        let new_value = match max_level {
+            BiniusLevel::L0 | BiniusLevel::L1 | BiniusLevel::L2 | BiniusLevel::L3 => {
+                // Max level requires u8 or less
+                let self_v = self.get_value_as_u8_safe(); // Safe cast up if needed
+                let other_v = other.get_value_as_u8_safe();
+                BiniusValue::U8(self_v ^ other_v)
+            }
+            BiniusLevel::L4 => {
+                // Max level requires u16
+                let self_v = self.get_value_as_u16_safe();
+                let other_v = other.get_value_as_u16_safe();
+                BiniusValue::U16(self_v ^ other_v)
+            }
+            BiniusLevel::L5 => {
+                // Max level requires u32
+                let self_v = self.get_value_as_u32_safe();
+                let other_v = other.get_value_as_u32_safe();
+                BiniusValue::U32(self_v ^ other_v)
+            }
+            BiniusLevel::L6 => {
+                // Max level requires u64
+                let self_v = self.get_value_as_u64_safe();
+                let other_v = other.get_value_as_u64_safe();
+                BiniusValue::U64(self_v ^ other_v)
+            }
+            BiniusLevel::L7 => {
+                // Max level requires u128
+                let self_v = self.get_value_as_u128(); // Already handles casting up
+                let other_v = other.get_value_as_u128();
+                BiniusValue::U128(self_v ^ other_v)
+            }
+        };
+
+        // Update level and value directly
+        self.level = max_level;
+        self.value = new_value;
+
+        // debug_assert!(self.is_valid());
+    }
+}
+
+impl Add for OptimizedBiniusTowerField {
+    type Output = Self;
+    fn add(mut self, other: Self) -> Self {
+        self += other;
+        self
+    }
+}
+
+// Implement Add for references
+impl<'a> Add<&'a OptimizedBiniusTowerField> for &'a OptimizedBiniusTowerField {
+    type Output = OptimizedBiniusTowerField;
+
+    fn add(self, other: &OptimizedBiniusTowerField) -> OptimizedBiniusTowerField {
+        let mut result = self.clone();
+        result += other.clone();
+        result
+    }
+}
+
+impl Sub for OptimizedBiniusTowerField {
+    type Output = Self;
+    fn sub(self, other: Self) -> Self {
+        self + other // Subtraction is the same as addition in F_2^n
+    }
+}
+
+impl Neg for OptimizedBiniusTowerField {
+    type Output = Self;
+    fn neg(self) -> Self {
+        self // Negation is identity in F_2^n
+    }
+}
+
+// --- From Traits ---
+// Note: These create fields with a default level based on the input type size.
+// This might differ from the original which used fixed levels.
+impl From<u128> for OptimizedBiniusTowerField {
+    fn from(val: u128) -> Self {
+        // Level 7 requires u128
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L7,
+            value: BiniusValue::U128(val),
+        }
+    }
+}
+impl From<u64> for OptimizedBiniusTowerField {
+    fn from(val: u64) -> Self {
+        // Level 6 requires u64
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L6,
+            value: BiniusValue::U64(val),
+        }
+    }
+}
+impl From<u32> for OptimizedBiniusTowerField {
+    fn from(val: u32) -> Self {
+        // Level 5 requires u32
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L5,
+            value: BiniusValue::U32(val),
+        }
+    }
+}
+impl From<u16> for OptimizedBiniusTowerField {
+    fn from(val: u16) -> Self {
+        // Level 4 requires u16
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L4,
+            value: BiniusValue::U16(val),
+        }
+    }
+}
+impl From<u8> for OptimizedBiniusTowerField {
+    // u8 can represent levels 0 through 3. Default to L3 (8 bits).
+    fn from(val: u8) -> Self {
+        // Level 3 requires u8
+        OptimizedBiniusTowerField {
+            level: BiniusLevel::L3,
+            value: BiniusValue::U8(val),
+        }
+    }
+}
+
+// --- Display & PartialEq ---
+
+impl fmt::Display for OptimizedBiniusTowerField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.get_value_as_u128())
+    }
+}
+
+// --- Sum ---
+impl Sum for OptimizedBiniusTowerField {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        iter.fold(OptimizedBiniusTowerField::zero(), |acc, x| acc + x)
+    }
+}
+
+// --- Multiplication Traits ---
+impl MulAssign for OptimizedBiniusTowerField {
+    fn mul_assign(&mut self, other: Self) {
+        // debug_assert!(self.is_valid());
+        // debug_assert!(other.is_valid());
+
+        let mut a = *self;
+        let mut b = other;
+
+        // 1. Align levels
+        let max_level = std::cmp::max(a.level, b.level);
+        if a.level < max_level {
+            a.extend_num_levels(max_level as usize);
+        }
+        if b.level < max_level {
+            b.extend_num_levels(max_level as usize);
+        }
+
+        // 2. Handle 0 and 1 optimizations
+        if a.is_zero() || b.is_one() {
+            *self = a;
+            return;
+        }
+        if a.is_one() || b.is_zero() {
+            *self = b;
+            return;
+        }
+
+        // 3. Base case: Levels 0, 1, 2 (GF(2), GF(4), GF(16)) - Use lookup table
+        if max_level <= BiniusLevel::L2 {
+            let val_a = a.get_value_as_u8();
+            let val_b = b.get_value_as_u8();
+            // GF16 table contains correct results for subfields GF(2) and GF(4)
+            let result_val = GF16_MULT_TABLE[val_a as usize][val_b as usize];
+            *self = OptimizedBiniusTowerField {
+                level: max_level, // Assign the original max_level (L0, L1, or L2)
+                value: BiniusValue::U8(result_val),
+            };
+            return;
+        }
+
+        // 4. Recursive step (Karatsuba-like) for levels > L2
+        let (a_hi, a_lo) = a.split();
+        let (b_hi, b_lo) = b.split();
+        let a_sum = a_hi + a_lo;
+        let b_sum = b_hi + b_lo;
+
+        *self = Self::mul_abstract(&a_hi, &a_lo, &a_sum, &b_hi, &b_lo, &b_sum);
+        // debug_assert!(self.is_valid());
+    }
+}
+
+impl Mul for OptimizedBiniusTowerField {
+    type Output = Self;
+    fn mul(mut self, other: Self) -> Self {
+        self *= other;
+        self
+    }
+}
+
+impl<'a> Mul<&'a OptimizedBiniusTowerField> for &'a OptimizedBiniusTowerField {
+    type Output = OptimizedBiniusTowerField;
+    fn mul(self, other: &OptimizedBiniusTowerField) -> OptimizedBiniusTowerField {
+        let mut result = self.clone();
+        result *= other.clone();
+        result
+    }
+}
+
+impl Product for OptimizedBiniusTowerField {
+    fn product<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = Self>,
+    {
+        // TODO: Check if Self::one() needs specific level adjustment?
+        // The fold handles level promotion correctly via AddAssign/MulAssign.
+        iter.fold(Self::one(), |acc, x| acc * x)
+    }
+}
+
+// --- TowerField Trait Implementation ---
+
+impl TowerField for OptimizedBiniusTowerField {
+    fn new(val: u128, num_levels: Option<usize>) -> Self {
+        Self::construct(val, num_levels)
+    }
+
+    fn rand(num_levels: Option<usize>) -> Self {
+        let level_num = num_levels.unwrap_or_else(|| rand::thread_rng().gen_range(0..=7));
+        let level = BiniusLevel::from_level(level_num).unwrap();
+        let num_bits = level.num_bits();
+
+        let random_val: u128 = if num_bits >= 128 {
+            rand::thread_rng().gen::<u128>()
+        } else {
+            let max_val = (1u128 << num_bits) - 1;
+            rand::thread_rng().gen_range(0..=max_val)
+        };
+
+        Self::construct(random_val, Some(level_num))
+    }
+
+    fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self> {
+        (0..size).map(|_| Self::rand(num_levels)).collect()
+    }
+
+    fn extend_num_levels(&mut self, new_level_num: usize) {
+        assert!(
+            new_level_num >= self.level as usize,
+            "Cannot extend to a lower level."
+        );
+        assert!(new_level_num <= 7, "Level cannot exceed 7.");
+
+        if new_level_num > self.level as usize {
+            let new_level = BiniusLevel::from_level(new_level_num).unwrap();
+            // Value itself doesn't change, but its interpretation/storage might
+            let current_val = self.get_value_as_u128();
+            self.level = new_level;
+            self.value = Self::create_value(current_val, new_level);
+        }
+    }
+
+    fn set_num_levels(&mut self, new_level_num: usize) {
+        assert!(new_level_num <= 7, "Level cannot exceed 7.");
+        let new_level = BiniusLevel::from_level(new_level_num).unwrap();
+        let current_val = self.get_value_as_u128();
+        self.level = new_level;
+        self.value = Self::create_value(current_val, new_level); // Re-mask value for the new level
+    }
+
+    fn get_val(&self) -> u128 {
+        self.get_value_as_u128()
+    }
+
+    fn bin(&self) -> String {
+        format!(
+            "{:0width$b}",
+            self.get_value_as_u128(),
+            width = self.level.num_bits()
+        )
+    }
+
+    fn split(&self) -> (Self, Self) {
+        assert!(self.level as usize > 0, "Cannot split field at level 0");
+
+        let current_val = self.get_value_as_u128();
+        let current_bits = self.level.num_bits();
+        let half_bits = current_bits / 2;
+        let lower_mask = (1u128 << half_bits) - 1;
+
+        let lo_val = current_val & lower_mask;
+        let hi_val = current_val >> half_bits;
+
+        let lower_level_num = self.level as usize - 1;
+
+        let hi = Self::construct(hi_val, Some(lower_level_num));
+        let lo = Self::construct(lo_val, Some(lower_level_num));
+
+        (hi, lo)
+    }
+
+    fn join(&self, other: &Self) -> Self {
+        assert_eq!(
+            self.level, other.level,
+            "Cannot join fields of different levels"
+        );
+        assert!(
+            (self.level as usize) < 7,
+            "Cannot join fields at max level 7"
+        );
+
+        let hi_val = self.get_value_as_u128();
+        let lo_val = other.get_value_as_u128();
+        let lower_bits = self.level.num_bits();
+
+        let joined_val = (hi_val << lower_bits) | lo_val;
+        let new_level_num = self.level as usize + 1;
+
+        Self::construct(joined_val, Some(new_level_num))
+    }
+
+    fn equals(&self, other: &Self) -> bool {
+        self == other // Use the derived PartialEq
+    }
+
+    // Implementation of Karatsuba-like multiplication step for tower fields.
+    // Based on x_k^2 = x_k * x_{k-1} + 1 relation.
+    fn mul_abstract(
+        a_hi: &Self,
+        a_lo: &Self,
+        a_sum: &Self,
+        b_hi: &Self,
+        b_lo: &Self,
+        b_sum: &Self,
+    ) -> Self {
+        // Assert components are one level lower and have same level
+        debug_assert!(a_hi.level == a_lo.level && a_lo.level == a_sum.level);
+        debug_assert!(
+            a_hi.level == b_hi.level && a_hi.level == b_lo.level && a_hi.level == b_sum.level
+        );
+
+        // Recursive multiplications at level k-1
+        let mut mx = *a_hi * *b_hi; // mx = a_hi * b_hi
+        let lo = *a_lo * *b_lo; // lo = a_lo * b_lo
+        let hi_term = *a_sum * *b_sum; // hi_term = (a_hi + a_lo) * (b_hi + b_lo)
+
+        let lower_level = mx.level; // Level k-1
+        let lower_num_bits = lower_level.num_bits();
+        let half_lower_bits = lower_num_bits / 2; // This corresponds to the power for x_{k-1}
+
+        // Calculate the low part of the result: lo_res = lo + mx
+        let lo_res = lo + mx;
+
+        // Calculate the high part: hi_res = hi_term + lo_res + mx * x_{k-1}
+        // Multiplication by x_{k-1} (element 2^{2^{k-2}} at level k-1)
+        // is equivalent to multiplying by (1 << half_lower_bits) at level k-1.
+        let x_k_minus_1 = Self::construct(1u128 << half_lower_bits, Some(lower_level as usize));
+        mx *= x_k_minus_1; // mx = mx * x_{k-1}
+
+        let hi_res = hi_term + lo_res + mx;
+
+        // Join hi and lo to get the result at level k
+        hi_res.join(&lo_res)
+    }
+
+    fn inverse(&self) -> Option<Self> {
+        // debug_assert!(self.is_valid());
+
+        // Inverse of 0 doesn't exist.
+        if self.is_zero() {
+            return None;
+        }
+
+        // Base case: Level 2 (GF(16) / 4-bit)
+        if self.level <= BiniusLevel::L2 {
+            // Ensure we are at least L2 if not L0 or L1 (which should be handled by the condition)
+            let mut field_l2 = self.clone();
+            if field_l2.level < BiniusLevel::L2 {
+                field_l2.extend_num_levels(2);
+            }
+            let val_u8 = field_l2.get_value_as_u8();
+            if val_u8 == 0 {
+                return None;
+            } // Should be caught by is_zero, but double-check
+
+            // Lookup table uses 1-based indexing for values 1-15.
+            let inv_val_u8 = F2_4_INVERSE[val_u8 as usize - 1] as u8;
+            return Some(OptimizedBiniusTowerField {
+                level: BiniusLevel::L2,
+                value: BiniusValue::U8(inv_val_u8),
+            });
+        }
+
+        // Recursive step:
+        let (a_hi, a_lo) = self.split(); // These are at level k-1
+        let lower_level = a_hi.level;
+        let half_lower_bits = lower_level.num_bits() / 2; // Power for x_{k-1}
+
+        // Calculate x_{k-1} = 2^{2^{k-2}} at level k-1
+        let x_k_minus_1 = Self::construct(1u128 << half_lower_bits, Some(lower_level as usize));
+
+        // Calculate a_lo_next = a_lo + a_hi * x_{k-1}
+        let a_lo_next = a_lo + a_hi * x_k_minus_1;
+
+        // Calculate delta = a_lo * a_lo_next + a_hi^2
+        let delta = (a_lo * a_lo_next) + (a_hi * a_hi);
+
+        // Recursively find inverse of delta
+        let delta_inverse = delta
+            .inverse()
+            .expect("Delta should be invertible if self is non-zero in higher fields");
+
+        // Calculate output components
+        let out_hi = delta_inverse * a_hi;
+        let out_lo = delta_inverse * a_lo_next;
+
+        // Join to get result at level k
+        Some(out_hi.join(&out_lo))
+    }
+
+    fn pow(&self, exp: u32) -> Self {
+        // debug_assert!(self.is_valid());
+
+        // Handle exp = 0 case first: always return 1 at level 0
+        if exp == 0 {
+            return Self::one();
+        }
+
+        let mut res = Self::one();
+        // Ensure 'one' starts at the correct level for subsequent multiplications
+        if res.level < self.level {
+            res.extend_num_levels(self.level as usize);
+        }
+
+        let mut base = *self;
+        let mut e = exp;
+
+        // Square-and-multiply algorithm
+        while e > 0 {
+            if e % 2 == 1 {
+                res *= base;
+            }
+            base *= base;
+            e /= 2;
+        }
+        // debug_assert!(res.is_valid());
+        res
+    }
+}
+
+// Ensure the original BiniusTowerField tests still pass if needed,
+// or add new tests specifically for OptimizedBiniusTowerField later.
