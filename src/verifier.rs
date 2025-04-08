@@ -70,14 +70,22 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
-            let round_poly_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
-            if round_poly_evaluations.len() != (proof.degree + 1) {
+            // Received evaluations are s_i(inf), s_i(1)...s_i(d-1)
+            let received_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
+            // Expect d = proof.degree evaluations
+            if received_evaluations.len() != proof.degree {
                 return Err(SumcheckError::InvalidRoundPolynomial);
             }
 
-            let round_poly_evaluation_at_0 = round_poly_evaluations[0];
-            let round_poly_evaluation_at_1 = round_poly_evaluations[1];
-            let computed_sum = round_poly_evaluation_at_0 + round_poly_evaluation_at_1;
+            // Extract s_i(inf) and s_i(1)...s_i(d-1)
+            // Assume degree >= 1 based on user request
+            if received_evaluations.len() < 2 {
+                // Need at least s_i(inf), s_i(1) for d >= 1
+                // This implicitly catches degree 0 or 1 with insufficient data
+                return Err(SumcheckError::InvalidRoundPolynomial);
+            }
+            let round_poly_evaluation_at_inf = received_evaluations[0];
+            let round_poly_evaluation_at_1 = received_evaluations[1]; // s_i(1)
 
             // Check rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
             //
@@ -114,15 +122,21 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 }
                 None => expected_sum,
             };
-            if computed_sum != modified_expected_sum {
-                return Err(SumcheckError::ProofVerificationFailure);
-            }
 
-            // append the prover's message to the transcript
+            // Derive s_i(0) using the expected sum: s_i(0) = modified_expected_sum - s_i(1)
+            let derived_round_poly_evaluation_at_0 =
+                modified_expected_sum - round_poly_evaluation_at_1;
+
+            // Reconstruct the evaluations vector [s_i(0), s_i(1), ..., s_i(d-1)] needed for interpolation
+            let mut evaluations_for_interpolation = Vec::with_capacity(proof.degree);
+            evaluations_for_interpolation.push(derived_round_poly_evaluation_at_0);
+            evaluations_for_interpolation.extend_from_slice(&received_evaluations[1..]); // Add s_i(1) .. s_i(d-1)
+
+            // append the *prover's actual message* to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
-                &proof.round_polynomials[round_index],
+                received_evaluations, // Use the received evaluations [s(inf), s(1)..s(d-1)]
             );
 
             // derive the verifier's challenge for the next round
@@ -131,11 +145,81 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 b"challenge_nextround",
             );
 
-            // Compute r_{i}(α_i) using barycentric interpolation
-            expected_sum = barycentric_interpolation(round_poly_evaluations, alpha);
+            // Compute r_{i}(α_i) using the interpolation formula with infinity
+            expected_sum = barycentric_interpolation_with_infinity(
+                &evaluations_for_interpolation, // s(0)..s(d-1)
+                round_poly_evaluation_at_inf,   // s(inf)
+                alpha,
+            );
         }
         Ok(true)
     }
+}
+
+/// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
+/// This method is explicitly single-threaded.
+/// Based on arkwork's function (but modified for binary tower fields):
+/// https://github.com/arkworks-rs/algebra/blob/b33df5cce2d54cf4c9248e4b229c7d6708fa9375/ff/src/fields/mod.rs#L381
+fn batch_inversion_and_multiply<F: Field>(v: &mut [F], coeff: &F) {
+    // Montgomery's Trick and Fast Implementation of Masked AES
+    // Genelle, Prouff and Quisquater
+    // Section 3.2
+    // but with an optimization to multiply every element in the returned vector by
+    // coeff
+
+    // First pass: compute [a, ab, abc, abcd]
+    let mut prod = Vec::with_capacity(v.len());
+    let mut tmp = F::one();
+    for f in v.iter().filter(|f| !f.is_zero()) {
+        tmp.mul_assign(f.clone());
+        prod.push(tmp);
+    }
+
+    // Invert `tmp` ==> tmp = (1 / abcd)
+    tmp = tmp.inverse().unwrap(); // Guaranteed to be nonzero.
+
+    // Multiply product by coeff, so all inverses will be scaled by coeff
+    // tmp = q / abcd
+    tmp *= coeff.clone();
+
+    // Second pass: iterate backwards to compute inverses
+    // f: [d  c  a  b]
+    // s: [abc  ab  a  1]
+    // tmp: q / abcd
+    //
+    // 0:  abc * tmp = abc * (q / abcd) = q / d
+    // 1:  ab  * tmp = ab  * (q / abc)  = q / c
+    // 2:  a   * tmp = a   * (q / ab)   = q / b
+    // 3:  1   * tmp = 1   * (q / a)    = q / a
+    //
+    for (f, s) in v
+        .iter_mut()
+        // Backwards
+        .rev()
+        // Ignore normalized elements
+        .filter(|f| !f.is_zero())
+        // Backwards, skip last element, fill in one for last term.
+        .zip(prod.into_iter().rev().skip(1).chain(Some(F::one())))
+    {
+        // tmp := tmp * f; f := tmp * s = 1/f
+        let new_tmp = tmp * *f;
+        *f = tmp * s;
+        tmp = new_tmp;
+    }
+}
+
+fn compute_barycentric_weight<F: Field>(i: usize, n: usize) -> F {
+    let mut weight = F::one();
+    let f_i = F::new(i as u128, None);
+    for j in 0..n {
+        if j == i {
+            continue;
+        } else {
+            let difference = f_i - F::new(j as u128, None);
+            weight *= difference;
+        }
+    }
+    weight
 }
 
 ///
@@ -147,32 +231,34 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 ///
 pub(crate) fn barycentric_interpolation<F: Field>(evaluations: &[F], x: F) -> F {
     let num_points = evaluations.len();
-    let mut lagrange_coefficients: Vec<F> =
-        (0..num_points).map(|j| x - F::from(j as u64)).collect();
-    let lagrange_evaluation = lagrange_coefficients
-        .iter()
-        .fold(F::one(), |mult, lc| mult * lc);
-
-    for i in 0..num_points {
-        let negative_factorial = u64_factorial(num_points - 1 - i);
-        let positive_factorial = u64_factorial(i);
-
-        let barycentric_weight = negative_factorial * positive_factorial;
-        if (num_points - 1 - i) % 2 == 1 {
-            lagrange_coefficients[i] *= -F::from(barycentric_weight);
-        } else {
-            lagrange_coefficients[i] *= F::from(barycentric_weight);
-        }
+    if (x.get_val() as usize) < num_points {
+        return evaluations[x.get_val() as usize];
     }
 
-    batch_inversion_and_mul(&mut lagrange_coefficients, &F::one());
+    // Calculate L(x) = product_{k=0}^{n-1} (x - k)
+    let lagrange_evaluation = (0..num_points)
+        .map(|j| x - F::new(j as u128, None))
+        .fold(F::one(), |mult, val| mult * val);
 
-    return lagrange_evaluation
-        * evaluations
-            .iter()
-            .zip(lagrange_coefficients.iter())
-            .fold(F::zero(), |acc, (&e, &lc)| acc + e * lc);
-}
+    // Calculate terms to be inverted: (x - j) * product_{k != j}(j - k)
+    let mut terms_to_invert: Vec<F> = Vec::with_capacity(num_points);
+    for j in 0..num_points {
+        let x_minus_j = x - F::new(j as u128, None);
+        let weight_j = compute_barycentric_weight::<F>(j, num_points); // weight_j = product_{k != j}(j-k)
+        terms_to_invert.push(x_minus_j * weight_j);
+    }
+
+    // Batch invert the terms: terms_to_invert[j] now holds 1 / ((x-j)*w_j)
+    batch_inversion_and_multiply(&mut terms_to_invert, &F::one());
+
+    // Evaluate the final polynomial at point x using the formula:
+    // P(x) = L(x) * sum_{j=0}^{n-1} ( y_j / ((x-j)*w_j) )
+    let interpolation_result = evaluations
+        .iter()
+        .zip(terms_to_invert.iter())
+        .fold(F::zero(), |acc, (&y_j, &inv_term_j)| {
+            acc + (y_j * inv_term_j)
+        });
 
 /// compute the factorial(a) = 1 * 2 * ... * a
 #[inline]
@@ -182,6 +268,40 @@ fn u64_factorial(a: usize) -> u64 {
         res *= i as u64;
     }
     res
+}
+
+///
+/// Evaluates a polynomial s(x) of degree `d` given its evaluations at points {0, 1, ..., d-1}
+/// and its evaluation at infinity s(inf), which is the leading coefficient.
+/// Uses the formula from Lemma 2.2 (Eq 10) adapted for points {inf, 0, ..., d-1}:
+/// s(x) = s(inf) * product_{k=0}^{d-1}(x - k) + P_{0..d-1}(x)
+/// where P_{0..d-1}(x) is the unique polynomial of degree d-1 passing through (k, s(k)) for k=0..d-1.
+///
+pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
+    evaluations_at_0_to_d_minus_1: &[F],
+    evaluation_at_infinity: F,
+    x: F,
+) -> F {
+    let d = evaluations_at_0_to_d_minus_1.len(); // This is the degree
+
+    // Check if x is one of the finite evaluation points {0, ..., d-1}
+    if (x.get_val() as usize) < d {
+        return evaluations_at_0_to_d_minus_1[x.get_val() as usize];
+    }
+
+    // Calculate L(x) = product_{k=0}^{d-1} (x - k)
+    let mut l_at_x = F::one();
+    for k in 0..d {
+        l_at_x *= x - F::new(k as u128, None);
+    }
+
+    // Calculate P_{0..d-1}(x) using standard barycentric interpolation for points {0..d-1}
+    // Note: The polynomial P has degree d-1, uses d points {0..d-1}
+    // Input evaluations should be s(0)...s(d-1)
+    let interp_poly_degree_d_minus_1 = barycentric_interpolation(evaluations_at_0_to_d_minus_1, x);
+
+    // Combine results: s(x) = s(inf) * L(x) + P_{0..d-1}(x)
+    evaluation_at_infinity * l_at_x + interp_poly_degree_d_minus_1
 }
 
 #[cfg(test)]
@@ -215,6 +335,53 @@ mod test {
             .collect::<Vec<F>>();
         let query = F::rand(&mut prng);
 
+        // Create a random coefficient to multiply every element in the vector after inversion
+        let coeff = BF::rand(Some(2));
+
+        // Store the original vector for verification after batch inversion
+        let original_v = v.clone();
+
+        // Perform the batch inversion and multiplication
+        batch_inversion_and_multiply(&mut v, &coeff);
+
+        // Check that each non-zero element in the original vector was correctly inverted
+        for (i, elem) in original_v.iter().enumerate() {
+            // Ignore zero elements as they are not inverted
+            if !elem.is_zero() {
+                // The product of the original element and its batch inverse (multiplied by the coefficient)
+                // should be equal to the coefficient
+                let inverted_elem = &v[i];
+
+                // Check that elem * inverted_elem * coeff = coeff
+                let product = *elem * *inverted_elem;
+
+                // Since we're in a binary field, this product should equal coeff
+                assert_eq!(product, coeff, "Batch inversion failed at index {}", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_barycentric_interpolation_random() {
+        const NE: u32 = 100; // Number of elements
+
+        // Step 1: Sample a random coefficient vector
+        let coeffs: Vec<BF> = (0..NE).map(|_| BF::rand(Some(3))).collect();
+
+        // Step 2: Compute its evaluation on [0, 1, ..., N-1]
+        let points: Vec<BF> = (0..NE).map(|j| BF::new(j as u128, Some(3))).collect();
+        let values: Vec<BF> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
+
+        // Step 3: Choose a random point in a large range
+        let x_rand = BF::rand(Some(6));
+
+        // Step 4: Perform barycentric interpolation at the random point
+        let barycentric_eval = barycentric_interpolation(&values, x_rand);
+
+        // Step 5: Evaluate the original coefficient form at the random point
+        let original_eval = evaluate(&coeffs, &x_rand);
+
+        // Step 6: Assert that the barycentric evaluation matches the original evaluation
         assert_eq!(
             poly.evaluate(&query),
             barycentric_interpolation(&evals, query)
