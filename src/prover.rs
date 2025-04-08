@@ -144,7 +144,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Declare r_polys and initialise it with 0s
         let r_degree = prover_state.max_multiplicands;
         let mut r_polys: Vec<Vec<EF>> = (0..prover_state.num_vars)
-            .map(|_| vec![EF::zero(); r_degree + 1])
+            .map(|_| vec![EF::zero(); r_degree])
             .collect();
 
         // Check if eq challenges length is equal to the number of variables

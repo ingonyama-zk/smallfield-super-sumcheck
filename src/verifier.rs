@@ -71,14 +71,22 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
-            let round_poly_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
-            if round_poly_evaluations.len() != (proof.degree + 1) {
+            // Received evaluations are s_i(inf), s_i(1)...s_i(d-1)
+            let received_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
+            // Expect d = proof.degree evaluations
+            if received_evaluations.len() != proof.degree {
                 return Err(SumcheckError::InvalidRoundPolynomial);
             }
 
-            let round_poly_evaluation_at_0 = round_poly_evaluations[0];
-            let round_poly_evaluation_at_1 = round_poly_evaluations[1];
-            let computed_sum = round_poly_evaluation_at_0 + round_poly_evaluation_at_1;
+            // Extract s_i(inf) and s_i(1)...s_i(d-1)
+            // Assume degree >= 1 based on user request
+            if received_evaluations.len() < 2 {
+                // Need at least s_i(inf), s_i(1) for d >= 1
+                // This implicitly catches degree 0 or 1 with insufficient data
+                return Err(SumcheckError::InvalidRoundPolynomial);
+            }
+            let round_poly_evaluation_at_inf = received_evaluations[0];
+            let round_poly_evaluation_at_1 = received_evaluations[1]; // s_i(1)
 
             // Check rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
             //
@@ -115,15 +123,21 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 }
                 None => expected_sum,
             };
-            if computed_sum != modified_expected_sum {
-                return Err(SumcheckError::ProofVerificationFailure);
-            }
 
-            // append the prover's message to the transcript
+            // Derive s_i(0) using the expected sum: s_i(0) = modified_expected_sum - s_i(1)
+            let derived_round_poly_evaluation_at_0 =
+                modified_expected_sum - round_poly_evaluation_at_1;
+
+            // Reconstruct the evaluations vector [s_i(0), s_i(1), ..., s_i(d-1)] needed for interpolation
+            let mut evaluations_for_interpolation = Vec::with_capacity(proof.degree);
+            evaluations_for_interpolation.push(derived_round_poly_evaluation_at_0);
+            evaluations_for_interpolation.extend_from_slice(&received_evaluations[1..]); // Add s_i(1) .. s_i(d-1)
+
+            // append the *prover's actual message* to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
-                &proof.round_polynomials[round_index],
+                received_evaluations, // Use the received evaluations [s(inf), s(1)..s(d-1)]
             );
 
             // derive the verifier's challenge for the next round
@@ -132,8 +146,12 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 b"challenge_nextround",
             );
 
-            // Compute r_{i}(α_i) using barycentric interpolation
-            expected_sum = barycentric_interpolation(round_poly_evaluations, alpha);
+            // Compute r_{i}(α_i) using the interpolation formula with infinity
+            expected_sum = barycentric_interpolation_with_infinity(
+                &evaluations_for_interpolation, // s(0)..s(d-1)
+                round_poly_evaluation_at_inf,   // s(inf)
+                alpha,
+            );
         }
         Ok(true)
     }
@@ -144,7 +162,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 /// Based on arkwork's function (but modified for binary tower fields):
 /// https://github.com/arkworks-rs/algebra/blob/b33df5cce2d54cf4c9248e4b229c7d6708fa9375/ff/src/fields/mod.rs#L381
 fn batch_inversion_and_multiply<F: TowerField>(v: &mut [F], coeff: &F) {
-    // Montgomery’s Trick and Fast Implementation of Masked AES
+    // Montgomery's Trick and Fast Implementation of Masked AES
     // Genelle, Prouff and Quisquater
     // Section 3.2
     // but with an optimization to multiply every element in the returned vector by
@@ -217,40 +235,70 @@ fn compute_barycentric_weight<F: TowerField>(i: usize, n: usize) -> F {
 pub(crate) fn barycentric_interpolation<F: TowerField>(evaluations: &[F], x: F) -> F {
     // If the evaluation point x is in I, just return the corresponding evaluation.
     let num_points = evaluations.len();
-    if x.get_val() < (num_points as u128) {
+    if (x.get_val() as usize) < num_points {
         return evaluations[x.get_val() as usize];
     }
 
-    // Calculate Lagrange coefficients: (x - 0), (x - 1), ..., (x - (n - 1))
-    let mut lagrange_coefficients: Vec<F> = (0..num_points)
+    // Calculate L(x) = product_{k=0}^{n-1} (x - k)
+    let lagrange_evaluation = (0..num_points)
         .map(|j| x - F::new(j as u128, None))
-        .collect();
+        .fold(F::one(), |mult, val| mult * val);
 
-    // Compute the product of all lagrange coefficients: (x - 0) * (x - 1) * ... * (x - (n - 1))
-    let lagrange_evaluation = lagrange_coefficients
-        .iter()
-        .fold(F::one(), |mult, lc| mult * lc.clone());
-
-    for i in 0..num_points {
-        // The i-th barycentric weight is: (i - 0) * (i - 1) * ... * (i - (n - 1))
-        // except the (i - i) term (ofcourse).
-        let barycentric_weight = compute_barycentric_weight::<F>(i, num_points);
-
-        // Modify the coefficients with the barycentric weights
-        lagrange_coefficients[i] *= barycentric_weight;
+    // Calculate terms to be inverted: (x - j) * product_{k != j}(j - k)
+    let mut terms_to_invert: Vec<F> = Vec::with_capacity(num_points);
+    for j in 0..num_points {
+        let x_minus_j = x - F::new(j as u128, None);
+        let weight_j = compute_barycentric_weight::<F>(j, num_points); // weight_j = product_{k != j}(j-k)
+        terms_to_invert.push(x_minus_j * weight_j);
     }
 
-    // Perform batch inversion and multiply by the coefficient
-    // Here, we assume you want to multiply by the identity (F::one())
-    batch_inversion_and_multiply(&mut lagrange_coefficients, &F::one());
+    // Batch invert the terms: terms_to_invert[j] now holds 1 / ((x-j)*w_j)
+    batch_inversion_and_multiply(&mut terms_to_invert, &F::one());
 
-    // Evaluate the final polynomial at point x
+    // Evaluate the final polynomial at point x using the formula:
+    // P(x) = L(x) * sum_{j=0}^{n-1} ( y_j / ((x-j)*w_j) )
     let interpolation_result = evaluations
         .iter()
-        .zip(lagrange_coefficients.iter())
-        .fold(F::zero(), |acc, (&e, &lc)| acc + (e * lc));
+        .zip(terms_to_invert.iter())
+        .fold(F::zero(), |acc, (&y_j, &inv_term_j)| {
+            acc + (y_j * inv_term_j)
+        });
 
     return lagrange_evaluation * interpolation_result;
+}
+
+///
+/// Evaluates a polynomial s(x) of degree `d` given its evaluations at points {0, 1, ..., d-1}
+/// and its evaluation at infinity s(inf), which is the leading coefficient.
+/// Uses the formula from Lemma 2.2 (Eq 10) adapted for points {inf, 0, ..., d-1}:
+/// s(x) = s(inf) * product_{k=0}^{d-1}(x - k) + P_{0..d-1}(x)
+/// where P_{0..d-1}(x) is the unique polynomial of degree d-1 passing through (k, s(k)) for k=0..d-1.
+///
+pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
+    evaluations_at_0_to_d_minus_1: &[F],
+    evaluation_at_infinity: F,
+    x: F,
+) -> F {
+    let d = evaluations_at_0_to_d_minus_1.len(); // This is the degree
+
+    // Check if x is one of the finite evaluation points {0, ..., d-1}
+    if (x.get_val() as usize) < d {
+        return evaluations_at_0_to_d_minus_1[x.get_val() as usize];
+    }
+
+    // Calculate L(x) = product_{k=0}^{d-1} (x - k)
+    let mut l_at_x = F::one();
+    for k in 0..d {
+        l_at_x *= x - F::new(k as u128, None);
+    }
+
+    // Calculate P_{0..d-1}(x) using standard barycentric interpolation for points {0..d-1}
+    // Note: The polynomial P has degree d-1, uses d points {0..d-1}
+    // Input evaluations should be s(0)...s(d-1)
+    let interp_poly_degree_d_minus_1 = barycentric_interpolation(evaluations_at_0_to_d_minus_1, x);
+
+    // Combine results: s(x) = s(inf) * L(x) + P_{0..d-1}(x)
+    evaluation_at_infinity * l_at_x + interp_poly_degree_d_minus_1
 }
 
 #[cfg(test)]
@@ -323,7 +371,7 @@ mod test {
         let values: Vec<BF> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
 
         // Step 3: Choose a random point in a large range
-        let x_rand = BF::rand(Some(5));
+        let x_rand = BF::rand(Some(6));
 
         // Step 4: Perform barycentric interpolation at the random point
         let barycentric_eval = barycentric_interpolation(&values, x_rand);
