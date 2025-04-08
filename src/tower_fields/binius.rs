@@ -877,14 +877,12 @@ mod compare_implementations {
 
     // --- Benchmarks ---
 
-    fn benchmark_op<FL, FO>(name: &str, level: usize, legacy_op: FL, opt_op: FO)
+    fn benchmark_op<FL, FO, FU>(name: &str, level: usize, legacy_op: FL, opt_op: FO, unopt_op: FU)
     where
         FL: Fn() -> (),
         FO: Fn() -> (),
+        FU: Fn() -> (),
     {
-        // Warm-up (optional, can help stabilize)
-        // for _ in 0..10 { legacy_op(); opt_op(); }
-
         let start_legacy = Instant::now();
         for _ in 0..BENCH_ITERATIONS {
             legacy_op();
@@ -897,26 +895,46 @@ mod compare_implementations {
         }
         let time_opt = start_opt.elapsed();
 
-        println!(
-            "Bench L{}: {:<10} | Legacy: {:>10.2?} | Optimized: {:>10.2?}",
-            level,
-            name,
-            time_legacy / BENCH_ITERATIONS as u32,
-            time_opt / BENCH_ITERATIONS as u32
-        );
+        let start_unopt = Instant::now();
+        for _ in 0..BENCH_ITERATIONS {
+            unopt_op();
+        }
+        let time_unopt = start_unopt.elapsed();
+
+        // Print full results only for Mul, otherwise skip Unoptimized
+        if name.starts_with("Mul") {
+            println!(
+                "Bench L{}: {:<15} | Legacy: {:>10.2?} | Optimized: {:>10.2?} | Unoptimized: {:>10.2?}",
+                level,
+                name,
+                time_legacy / BENCH_ITERATIONS as u32,
+                time_opt / BENCH_ITERATIONS as u32,
+                time_unopt / BENCH_ITERATIONS as u32
+            );
+        } else {
+            println!(
+                "Bench L{}: {:<15} | Legacy: {:>10.2?} | Optimized: {:>10.2?}",
+                level,
+                name,
+                time_legacy / BENCH_ITERATIONS as u32,
+                time_opt / BENCH_ITERATIONS as u32
+            );
+        }
     }
 
-    #[test]
-    fn benchmark_level_3() {
+    // Helper function to run benchmarks for a specific level
+    fn run_level_benchmarks(level: usize, exp_factor: u32) {
+        let iterations = BENCH_ITERATIONS;
         println!(
-            "\n--- Benchmarking Level 3 ({} iterations) ---",
-            BENCH_ITERATIONS
+            "\n--- Benchmarking Level {} ({} iterations) ---",
+            level,
+            iterations // Use actual iterations here
         );
-        let level = 3;
         let (l1, o1) = rand_pair(level);
         let (l2, o2) = rand_pair(level);
-        let exp = 15u32;
+        let exp = 10 * exp_factor; // Scale exponent roughly with level
 
+        // Add
         benchmark_op(
             "Add",
             level,
@@ -926,143 +944,112 @@ mod compare_implementations {
             || {
                 let _ = o1 + o2;
             },
+            || { /* Placeholder */ },
         );
-        benchmark_op(
-            "Mul",
-            level,
-            || {
-                let _ = l1 * l2;
-            },
-            || {
-                let _ = o1 * o2;
-            },
-        );
+        // Inverse (skip for 0)
+        let l1_clone = l1.clone(); // Clone before move into closure
+        let o1_clone = o1.clone();
         benchmark_op(
             "Inverse",
             level,
-            || {
-                let _ = l1.inverse();
+            move || {
+                let _ = l1_clone.inverse();
             },
-            || {
-                let _ = o1.inverse();
+            move || {
+                let _ = o1_clone.inverse();
             },
+            || { /* Placeholder */ },
         );
+        // Pow
+        let l1_clone_pow = l1.clone();
+        let o1_clone_pow = o1.clone();
         benchmark_op(
             "Pow",
             level,
-            || {
-                let _ = l1.pow(exp);
+            move || {
+                let _ = l1_clone_pow.pow(exp);
             },
-            || {
-                let _ = o1.pow(exp);
+            move || {
+                let _ = o1_clone_pow.pow(exp);
             },
+            || { /* Placeholder */ },
         );
     }
 
     #[test]
-    fn benchmark_level_5() {
-        println!(
-            "\n--- Benchmarking Level 5 ({} iterations) ---",
-            BENCH_ITERATIONS
-        );
-        let level = 5;
-        let (l1, o1) = rand_pair(level);
-        let (l2, o2) = rand_pair(level);
-        let exp = 30u32;
-
-        benchmark_op(
-            "Add",
-            level,
-            || {
-                let _ = l1 + l2;
-            },
-            || {
-                let _ = o1 + o2;
-            },
-        );
-        benchmark_op(
-            "Mul",
-            level,
-            || {
-                let _ = l1 * l2;
-            },
-            || {
-                let _ = o1 * o2;
-            },
-        );
-        benchmark_op(
-            "Inverse",
-            level,
-            || {
-                let _ = l1.inverse();
-            },
-            || {
-                let _ = o1.inverse();
-            },
-        );
-        benchmark_op(
-            "Pow",
-            level,
-            || {
-                let _ = l1.pow(exp);
-            },
-            || {
-                let _ = o1.pow(exp);
-            },
-        );
+    fn benchmark_levels() {
+        run_level_benchmarks(3, 2);
+        run_level_benchmarks(5, 3);
+        run_level_benchmarks(7, 5);
     }
 
     #[test]
-    fn benchmark_level_7() {
+    fn benchmark_mul() {
+        // Renamed and consolidated function
         println!(
-            "\n--- Benchmarking Level 7 ({} iterations) ---",
+            "\n--- Benchmarking Multiplication ({} iterations) ---",
             BENCH_ITERATIONS
         );
-        let level = 7;
-        let (l1, o1) = rand_pair(level);
-        let (l2, o2) = rand_pair(level);
-        let exp = 50u32;
 
-        benchmark_op(
-            "Add",
-            level,
-            || {
-                let _ = l1 + l2;
-            },
-            || {
-                let _ = o1 + o2;
-            },
-        );
-        benchmark_op(
-            "Mul",
-            level,
-            || {
-                let _ = l1 * l2;
-            },
-            || {
-                let _ = o1 * o2;
-            },
-        );
-        benchmark_op(
-            "Inverse",
-            level,
-            || {
-                let _ = l1.inverse();
-            },
-            || {
-                let _ = o1.inverse();
-            },
-        );
-        benchmark_op(
-            "Pow",
-            level,
-            || {
-                let _ = l1.pow(exp);
-            },
-            || {
-                let _ = o1.pow(exp);
-            },
-        );
+        // Equal levels
+        for level in [3, 5, 7] {
+            println!("\nBenchmarking L{} * L{}", level, level);
+            let (l_a, o_a) = rand_pair(level);
+            let (l_b, o_b) = rand_pair(level);
+
+            benchmark_op(
+                &format!("Mul L{}*L{}", level, level),
+                level,
+                || {
+                    let _ = l_a * l_b;
+                },
+                || {
+                    let _ = o_a * o_b;
+                },
+                || {
+                    let _ = OptBTF::mul_unoptimized(o_a, o_b);
+                },
+            );
+        }
+
+        // Mixed levels
+        let pairs_to_bench = [(3, 5), (3, 7), (5, 7), (6, 7)];
+        for (level_a, level_b) in pairs_to_bench {
+            println!("\nBenchmarking L{} * L{}", level_a, level_b);
+            let (l_a, o_a) = rand_pair(level_a);
+            let (l_b, o_b) = rand_pair(level_b);
+            let result_level = std::cmp::max(level_a, level_b);
+
+            // Benchmark a * b
+            benchmark_op(
+                &format!("Mul L{}*L{}", level_a, level_b),
+                result_level, // Label with result level
+                || {
+                    let _ = l_a * l_b;
+                },
+                || {
+                    let _ = o_a * o_b;
+                },
+                || {
+                    let _ = OptBTF::mul_unoptimized(o_a, o_b);
+                },
+            );
+
+            // Benchmark b * a
+            benchmark_op(
+                &format!("Mul L{}*L{}", level_b, level_a),
+                result_level, // Label with result level
+                || {
+                    let _ = l_b * l_a;
+                },
+                || {
+                    let _ = o_b * o_a;
+                },
+                || {
+                    let _ = OptBTF::mul_unoptimized(o_b, o_a);
+                },
+            );
+        }
     }
 
     #[test]
@@ -1107,8 +1094,6 @@ mod compare_implementations {
     }
 }
 
-// Proposed new structure for optimized Binius Tower Field representation
-
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Ord, PartialOrd)]
 pub enum BiniusLevel {
     L0, // 1 bit (GF(2^1))   - fits in u8
@@ -1152,18 +1137,11 @@ pub enum BiniusValue {
     U128(u128),
 }
 
-// TODO: Implement methods to easily get the value regardless of underlying type,
-// potentially converting to u128 when necessary for operations.
-
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct OptimizedBiniusTowerField {
     level: BiniusLevel,
     value: BiniusValue,
 }
-
-// TODO: Implement constructor, TowerField trait, and arithmetic operations
-// for OptimizedBiniusTowerField. This will involve matching on level/value variants
-// and potentially promoting values during operations.
 
 // Helper functions and implementations for OptimizedBiniusTowerField
 
@@ -1283,6 +1261,85 @@ impl OptimizedBiniusTowerField {
             BiniusLevel::L6 => matches!(self.value, BiniusValue::U64(_)),
             BiniusLevel::L7 => matches!(self.value, BiniusValue::U128(_)),
         }
+    }
+
+    /// Helper: Multiplies two elements assumed to be at the same level.
+    fn mul_equal_levels(a: Self, b: Self) -> Self {
+        debug_assert_eq!(a.level, b.level, "mul_equal_levels requires equal levels");
+        debug_assert!(a.is_valid());
+        debug_assert!(b.is_valid());
+
+        let level = a.level;
+
+        // Handle 0 and 1 optimizations
+        if a.is_zero() || b.is_one() {
+            return a;
+        }
+        if a.is_one() || b.is_zero() {
+            return b;
+        }
+
+        // Base case: Levels 0, 1, 2 (GF(2), GF(4), GF(16)) - Use lookup table
+        if level <= BiniusLevel::L2 {
+            let val_a = a.get_value_as_u8();
+            let val_b = b.get_value_as_u8();
+            let result_val = GF16_MULT_TABLE[val_a as usize][val_b as usize];
+            return OptimizedBiniusTowerField {
+                level: level, // Keep original level
+                value: BiniusValue::U8(result_val),
+            };
+        }
+
+        // Recursive step (Karatsuba-like) for levels > L2
+        let (a_hi, a_lo) = a.split();
+        let (b_hi, b_lo) = b.split();
+        let a_sum = a_hi + a_lo;
+        let b_sum = b_hi + b_lo;
+
+        let result = Self::mul_abstract(&a_hi, &a_lo, &a_sum, &b_hi, &b_lo, &b_sum);
+        debug_assert!(result.is_valid());
+        result
+    }
+
+    /// Helper: Recursive multiplication potentially handling different levels.
+    /// Computes a * b, assuming level(a) <= level(b).
+    fn mul_recursive_optimized(a: Self, b: Self) -> Self {
+        let level_a = a.level;
+        let level_b = b.level;
+
+        if level_b == level_a {
+            // Base case: Levels are equal
+            Self::mul_equal_levels(a, b)
+        } else if level_b > level_a {
+            // Recursive step: b has higher level
+            let (b_hi, b_lo) = b.split();
+            let res_hi = Self::mul_recursive_optimized(a, b_hi);
+            let res_lo = Self::mul_recursive_optimized(a, b_lo);
+            res_hi.join(&res_lo)
+        } else {
+            // Should not happen if called correctly from mul_assign
+            panic!("mul_recursive_optimized called with level(a) > level(b)");
+        }
+    }
+
+    /// Standalone multiplication that mimics the behavior BEFORE optimizing for unequal levels.
+    /// Always aligns levels first, then multiplies.
+    #[allow(dead_code)]
+    fn mul_unoptimized(a_orig: Self, b_orig: Self) -> Self {
+        let mut a = a_orig;
+        let mut b = b_orig;
+
+        // 1. Align levels (The key difference)
+        let max_level = std::cmp::max(a.level, b.level);
+        if a.level < max_level {
+            a.extend_num_levels(max_level as usize);
+        }
+        if b.level < max_level {
+            b.extend_num_levels(max_level as usize);
+        }
+
+        // 2. Multiply at the aligned level
+        Self::mul_equal_levels(a, b)
     }
 }
 
@@ -1472,48 +1529,22 @@ impl MulAssign for OptimizedBiniusTowerField {
         // debug_assert!(self.is_valid());
         // debug_assert!(other.is_valid());
 
-        let mut a = *self;
-        let mut b = other;
+        let level_a = self.level;
+        let level_b = other.level;
 
-        // 1. Align levels
-        let max_level = std::cmp::max(a.level, b.level);
-        if a.level < max_level {
-            a.extend_num_levels(max_level as usize);
-        }
-        if b.level < max_level {
-            b.extend_num_levels(max_level as usize);
-        }
+        let result = if level_a == level_b {
+            // Levels are equal, use direct same-level multiplication logic
+            Self::mul_equal_levels(*self, other)
+        } else if level_a < level_b {
+            // Self (a) has lower level, multiply into higher-level other (b)
+            Self::mul_recursive_optimized(*self, other)
+        } else {
+            // Other (b) has lower level, multiply into higher-level self (a)
+            Self::mul_recursive_optimized(other, *self)
+        };
 
-        // 2. Handle 0 and 1 optimizations
-        if a.is_zero() || b.is_one() {
-            *self = a;
-            return;
-        }
-        if a.is_one() || b.is_zero() {
-            *self = b;
-            return;
-        }
-
-        // 3. Base case: Levels 0, 1, 2 (GF(2), GF(4), GF(16)) - Use lookup table
-        if max_level <= BiniusLevel::L2 {
-            let val_a = a.get_value_as_u8();
-            let val_b = b.get_value_as_u8();
-            // GF16 table contains correct results for subfields GF(2) and GF(4)
-            let result_val = GF16_MULT_TABLE[val_a as usize][val_b as usize];
-            *self = OptimizedBiniusTowerField {
-                level: max_level, // Assign the original max_level (L0, L1, or L2)
-                value: BiniusValue::U8(result_val),
-            };
-            return;
-        }
-
-        // 4. Recursive step (Karatsuba-like) for levels > L2
-        let (a_hi, a_lo) = a.split();
-        let (b_hi, b_lo) = b.split();
-        let a_sum = a_hi + a_lo;
-        let b_sum = b_hi + b_lo;
-
-        *self = Self::mul_abstract(&a_hi, &a_lo, &a_sum, &b_hi, &b_lo, &b_sum);
+        // Update self with the computed result
+        *self = result;
         // debug_assert!(self.is_valid());
     }
 }
@@ -1573,11 +1604,12 @@ impl TowerField for OptimizedBiniusTowerField {
     }
 
     fn extend_num_levels(&mut self, new_level_num: usize) {
-        assert!(
+        // Use debug_assert for internal consistency checks
+        debug_assert!(
             new_level_num >= self.level as usize,
             "Cannot extend to a lower level."
         );
-        assert!(new_level_num <= 7, "Level cannot exceed 7.");
+        debug_assert!(new_level_num <= 7, "Level cannot exceed 7.");
 
         if new_level_num > self.level as usize {
             let new_level = BiniusLevel::from_level(new_level_num).unwrap();
@@ -1589,7 +1621,8 @@ impl TowerField for OptimizedBiniusTowerField {
     }
 
     fn set_num_levels(&mut self, new_level_num: usize) {
-        assert!(new_level_num <= 7, "Level cannot exceed 7.");
+        // Use debug_assert for internal consistency check
+        debug_assert!(new_level_num <= 7, "Level cannot exceed 7.");
         let new_level = BiniusLevel::from_level(new_level_num).unwrap();
         let current_val = self.get_value_as_u128();
         self.level = new_level;
@@ -1609,42 +1642,167 @@ impl TowerField for OptimizedBiniusTowerField {
     }
 
     fn split(&self) -> (Self, Self) {
-        assert!(self.level as usize > 0, "Cannot split field at level 0");
-
-        let current_val = self.get_value_as_u128();
-        let current_bits = self.level.num_bits();
-        let half_bits = current_bits / 2;
-        let lower_mask = (1u128 << half_bits) - 1;
-
-        let lo_val = current_val & lower_mask;
-        let hi_val = current_val >> half_bits;
+        // Use debug_assert for internal consistency check
+        debug_assert!(
+            self.level > BiniusLevel::L0,
+            "Cannot split field at level 0"
+        );
+        debug_assert!(self.is_valid());
 
         let lower_level_num = self.level as usize - 1;
+        let lower_level = BiniusLevel::from_level(lower_level_num).unwrap();
+        let half_bits = self.level.num_bits() / 2; // Bits in each half (lo/hi)
 
-        let hi = Self::construct(hi_val, Some(lower_level_num));
-        let lo = Self::construct(lo_val, Some(lower_level_num));
+        // Perform split based on the native type
+        let (hi, lo) = match self.value {
+            BiniusValue::U8(v) => {
+                // Splitting L1, L2, L3 (results are L0, L1, L2 - all fit in U8)
+                let mask = (1u8 << half_bits).wrapping_sub(1);
+                let lo_val = v & mask;
+                let hi_val = v >> half_bits;
+                let hi_value = BiniusValue::U8(hi_val);
+                let lo_value = BiniusValue::U8(lo_val);
+                (
+                    Self {
+                        level: lower_level,
+                        value: hi_value,
+                    },
+                    Self {
+                        level: lower_level,
+                        value: lo_value,
+                    },
+                )
+            }
+            BiniusValue::U16(v) => {
+                // Splitting L4 (results are L3 - fit in U8)
+                let mask = (1u16 << half_bits).wrapping_sub(1);
+                let lo_val = v & mask;
+                let hi_val = v >> half_bits;
+                let hi_value = BiniusValue::U8(hi_val as u8);
+                let lo_value = BiniusValue::U8(lo_val as u8);
+                (
+                    Self {
+                        level: lower_level,
+                        value: hi_value,
+                    },
+                    Self {
+                        level: lower_level,
+                        value: lo_value,
+                    },
+                )
+            }
+            BiniusValue::U32(v) => {
+                // Splitting L5 (results are L4 - fit in U16)
+                let mask = (1u32 << half_bits).wrapping_sub(1);
+                let lo_val = v & mask;
+                let hi_val = v >> half_bits;
+                let hi_value = BiniusValue::U16(hi_val as u16);
+                let lo_value = BiniusValue::U16(lo_val as u16);
+                (
+                    Self {
+                        level: lower_level,
+                        value: hi_value,
+                    },
+                    Self {
+                        level: lower_level,
+                        value: lo_value,
+                    },
+                )
+            }
+            BiniusValue::U64(v) => {
+                // Splitting L6 (results are L5 - fit in U32)
+                let mask = (1u64 << half_bits).wrapping_sub(1);
+                let lo_val = v & mask;
+                let hi_val = v >> half_bits;
+                let hi_value = BiniusValue::U32(hi_val as u32);
+                let lo_value = BiniusValue::U32(lo_val as u32);
+                (
+                    Self {
+                        level: lower_level,
+                        value: hi_value,
+                    },
+                    Self {
+                        level: lower_level,
+                        value: lo_value,
+                    },
+                )
+            }
+            BiniusValue::U128(v) => {
+                // Splitting L7 (results are L6 - fit in U64)
+                let mask = (1u128 << half_bits).wrapping_sub(1);
+                let lo_val = v & mask;
+                let hi_val = v >> half_bits;
+                let hi_value = BiniusValue::U64(hi_val as u64);
+                let lo_value = BiniusValue::U64(lo_val as u64);
+                (
+                    Self {
+                        level: lower_level,
+                        value: hi_value,
+                    },
+                    Self {
+                        level: lower_level,
+                        value: lo_value,
+                    },
+                )
+            }
+        };
 
+        debug_assert!(hi.is_valid());
+        debug_assert!(lo.is_valid());
         (hi, lo)
     }
 
     fn join(&self, other: &Self) -> Self {
-        assert_eq!(
+        // Use debug_assert for internal consistency checks
+        debug_assert_eq!(
             self.level, other.level,
             "Cannot join fields of different levels"
         );
-        assert!(
-            (self.level as usize) < 7,
+        debug_assert!(
+            self.level < BiniusLevel::L7,
             "Cannot join fields at max level 7"
         );
+        debug_assert!(self.is_valid());
+        debug_assert!(other.is_valid());
 
-        let hi_val = self.get_value_as_u128();
-        let lo_val = other.get_value_as_u128();
-        let lower_bits = self.level.num_bits();
+        let higher_level_num = self.level as usize + 1;
+        let higher_level = BiniusLevel::from_level(higher_level_num).unwrap();
+        let lower_bits = self.level.num_bits(); // Bits in each component (hi/lo)
 
-        let joined_val = (hi_val << lower_bits) | lo_val;
-        let new_level_num = self.level as usize + 1;
+        // Perform join based on the native type
+        let joined_value = match (self.value, other.value) {
+            (BiniusValue::U8(hi_v), BiniusValue::U8(lo_v)) => {
+                // Joining L0, L1, L2 -> L1, L2, L3 (all fit in U8)
+                // or Joining L3 -> L4 (requires U16)
+                if higher_level <= BiniusLevel::L3 {
+                    BiniusValue::U8(((hi_v as u8) << lower_bits) | lo_v)
+                } else {
+                    // Must be joining L3->L4
+                    BiniusValue::U16(((hi_v as u16) << lower_bits) | (lo_v as u16))
+                }
+            }
+            (BiniusValue::U16(hi_v), BiniusValue::U16(lo_v)) => {
+                // Joining L4 -> L5 (requires U32)
+                BiniusValue::U32(((hi_v as u32) << lower_bits) | (lo_v as u32))
+            }
+            (BiniusValue::U32(hi_v), BiniusValue::U32(lo_v)) => {
+                // Joining L5 -> L6 (requires U64)
+                BiniusValue::U64(((hi_v as u64) << lower_bits) | (lo_v as u64))
+            }
+            (BiniusValue::U64(hi_v), BiniusValue::U64(lo_v)) => {
+                // Joining L6 -> L7 (requires U128)
+                BiniusValue::U128(((hi_v as u128) << lower_bits) | (lo_v as u128))
+            }
+            // Mismatched types shouldn't happen if levels are equal and is_valid holds
+            _ => panic!("Inconsistent BiniusValue types during join despite equal levels"),
+        };
 
-        Self::construct(joined_val, Some(new_level_num))
+        let result = Self {
+            level: higher_level,
+            value: joined_value,
+        };
+        debug_assert!(result.is_valid());
+        result
     }
 
     fn equals(&self, other: &Self) -> bool {
@@ -1775,6 +1933,3 @@ impl TowerField for OptimizedBiniusTowerField {
         res
     }
 }
-
-// Ensure the original BiniusTowerField tests still pass if needed,
-// or add new tests specifically for OptimizedBiniusTowerField later.
