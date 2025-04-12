@@ -327,6 +327,18 @@ where
         }
     }
 
+    pub fn from_column(input_polynomial: &Vec<T>) -> Self {
+        let mut out = MatrixPolynomialInt {
+            no_of_rows: input_polynomial.len(),
+            no_of_columns: 1,
+            evaluation_rows: Vec::with_capacity(input_polynomial.len()),
+        };
+        for i in 0..input_polynomial.len() {
+            out.evaluation_rows.push(vec![input_polynomial[i]]);
+        }
+        out
+    }
+
     pub fn get_column(&self, column_index: usize) -> Vec<T> {
         let mut column = Vec::with_capacity(self.no_of_rows);
         for i in 0..self.no_of_rows {
@@ -578,6 +590,18 @@ where
         }
     }
 
+    pub fn from_column(input_polynomial: &Vec<F>) -> Self {
+        let mut out = MatrixPolynomial {
+            no_of_rows: input_polynomial.len(),
+            no_of_columns: 1,
+            evaluation_rows: Vec::with_capacity(input_polynomial.len()),
+        };
+        for i in 0..input_polynomial.len() {
+            out.evaluation_rows.push(vec![input_polynomial[i]]);
+        }
+        out
+    }
+
     pub fn from_linear_lagrange_list(input_polynomial: &LinearLagrangeList<F>) -> Self {
         let n_by_2 = input_polynomial.size;
         MatrixPolynomial {
@@ -713,6 +737,39 @@ where
             output.evaluation_rows[0].push(layer_values[0]);
         }
         output
+    }
+
+    pub fn compute_merkle_root(
+        input_layer: &Vec<F>,
+        index_j: usize,
+        mappings: &Vec<Box<dyn Fn(&F, &F) -> F + Send + Sync>>,
+    ) -> F {
+        // Fetch parameters.
+        // num_maps: (d + 1)
+        // depth: round number p
+        // bitmask: (d + 1)-bit mask
+        let num_maps = mappings.len();
+        let depth = log2(input_layer.len()) as usize;
+        // let bitmask = ((1 as usize) << num_maps) - 1;
+
+        // Output is a vector: { merkle( f(*, x), j ) }
+        // where x ∈ {0, 1}^{l - p}
+        let mut layer_values: Vec<F> = input_layer.clone();
+
+        // Start iterating over merkle tree layers starting with leaf values
+        for layer in 1..=depth {
+            let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
+            let mapping_for_this_layer = &mappings[j_layer];
+
+            let layer_size = (1 as usize) << (depth - layer);
+            for i in 0..layer_size {
+                let left = layer_values[2 * i];
+                let right = layer_values[2 * i + 1];
+                layer_values[i] = mapping_for_this_layer(&left, &right);
+            }
+            layer_values.truncate(layer_size);
+        }
+        layer_values[0]
     }
 
     pub fn merkle_sums(

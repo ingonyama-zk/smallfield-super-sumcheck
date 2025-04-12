@@ -192,105 +192,145 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         //  14   3    2    ∏_i p_i(1, 0, x) - p_i(1, 1, x)
         //  15   3    3    ∏_i p_i(1, 1, x)
         // +-----------------------------------------------------------------------------------+
+
+        // Accumulator structure is as follows:
         //
-        let mut precomputed_witness_matrix = MatrixPolynomial::<BF> {
-            no_of_rows: num_product_terms,
-            no_of_columns: 1 << (prover_state.num_vars - round_small_val),
-            evaluation_rows: Vec::with_capacity(num_product_terms),
-        };
-        for j in 0..num_product_terms {
-            let mut cumulative_matrix_row_for_j =
-                MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings)
-                    .evaluation_rows[0]
-                    .to_vec();
-
-            for i in 1..matrix_polynomials.len() {
-                let matrix_row_for_j =
-                    MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings)
-                        .evaluation_rows[0]
-                        .to_vec();
-                assert_eq!(cumulative_matrix_row_for_j.len(), matrix_row_for_j.len());
-                assert_eq!(
-                    cumulative_matrix_row_for_j.len(),
-                    1 << (prover_state.num_vars - round_small_val)
-                );
-                cumulative_matrix_row_for_j
-                    .iter_mut()
-                    .zip(&matrix_row_for_j)
-                    .for_each(|(a, b)| *a = mult_bb(a, b));
-            }
-            precomputed_witness_matrix
-                .evaluation_rows
-                .push(cumulative_matrix_row_for_j);
+        // [0 ... 0]                           (d + 1)
+        // [0 ... ... ... 0]                   (d + 1)^2
+        // [0 ... ... ... ... ... 0]           (d + 1)^3
+        // [  ...                      ]
+        // [0 ... ... ... ... ... ... ... 0]   (d + 1)^t
+        //
+        let mut precomputed_accumulators = Vec::with_capacity(round_small_val);
+        let mut round_size = num_witness_polys + 1;
+        for _ in 0..round_small_val {
+            precomputed_accumulators.push(vec![EF::zero(); round_size]);
+            round_size *= num_witness_polys + 1;
         }
-
-        // Santiy checks
-        let round_small_evals_size = 1 << (prover_state.num_vars - round_small_val);
-        assert_eq!(precomputed_witness_matrix.no_of_rows, num_product_terms);
+        assert_eq!(precomputed_accumulators.len(), round_small_val);
         assert_eq!(
-            precomputed_witness_matrix.no_of_columns,
-            round_small_evals_size
+            precomputed_accumulators.last().unwrap().len(),
+            num_product_terms
         );
-        assert!(precomputed_witness_matrix.no_of_columns % eq_2_evals.len() == 0);
 
-        // Let us compute the witness multiplied by eq2 evaluations
-        // The precomputed witness matrix is of size: 2^t x (N / 2^t)
-        let num_columns_in_compressed_witness =
-            precomputed_witness_matrix.no_of_columns / eq_2_evals.len();
-        let mut compressed_witness_with_eq_2 = MatrixPolynomial::<EF> {
-            no_of_rows: precomputed_witness_matrix.no_of_rows,
-            no_of_columns: num_columns_in_compressed_witness,
-            evaluation_rows: vec![
-                vec![EF::zero(); num_columns_in_compressed_witness];
-                precomputed_witness_matrix.no_of_rows
-            ],
-        };
+        //
+        //    | j |<--- eq2 --->|<--- eq 2 --->|<--- eq 2 --->|<--- eq 2 --->|
+        //    +---+----------------------------------------------------------+
+        //    | 0 |             |              |              |              |
+        //    | 1 |             |              |              |              |
+        //    | 2 |             |              |              |              |
+        //    | . |             |              |              |              |
+        //    | . |             |              |              |              |
+        //    | . |             |              |              |              |
+        //    | D |             |              |              |              |
+        //    +---+----------------------------------------------------------+
+        //
+        // where D = (d + 1)^t and total number of columns is 2^(n - t).
+        // We define a chunk as a set of columns that are multiplied with the same eq2 evaluation.
+        // The number of chunks is therefore: 2^(n - t) / 2^(n / 2) = 2^(n / 2 - t).
+        //
+        let eq_2_len = eq_2_evals.len();
+        let num_columns_in_round_small_val = matrix_polynomials[0].no_of_columns;
+        let num_chunks = num_columns_in_round_small_val / eq_2_len;
+        assert_eq!(
+            num_chunks,
+            1 << (prover_state.num_vars / 2 - round_small_val)
+        );
+        for chunk_index in 0..num_chunks {
+            let mut chunk_accumulator = vec![EF::zero(); num_product_terms];
+            for column_idx_in_chunk in 0..eq_2_len {
+                let column_idx = chunk_index * eq_2_len + column_idx_in_chunk;
 
-        for (row_idx, witness_row) in precomputed_witness_matrix
-            .evaluation_rows
-            .iter()
-            .enumerate()
-        {
-            for (chunk_idx, witness_chunk) in witness_row.chunks(eq_2_evals.len()).enumerate() {
-                compressed_witness_with_eq_2.evaluation_rows[row_idx][chunk_idx] = witness_chunk
+                // We need to compute the product of the columns of the witness matrix
+                //
+                // For that, we fetch a column from the first matrix polynomial
+                // and compute its merkle roots: p(j_1, j_2, ..., j_t, x)
+                // j_1, j_2, ..., j_t \in [0, d]^t
+                //
+                // We then compute similar merkle roots for the other matrix polynomials
+                // and multiply them with the first column.
+                let column_values_0 = matrix_polynomials[0]
+                    .evaluation_rows
                     .iter()
-                    .zip(&eq_2_evals)
-                    .map(|(w_val, eq_2_challenge)| mult_be(w_val, eq_2_challenge))
-                    .sum();
-            }
-        }
+                    .map(|row| row[column_idx])
+                    .collect::<Vec<BF>>();
+                let mut cumulative_column: Vec<BF> = (0..num_product_terms)
+                    .map(|j| MatrixPolynomial::compute_merkle_root(&column_values_0, j, mappings))
+                    .collect();
 
-        // Let us iterate over the precomputed matrix and compute the witness terms
-        // for each round.
-        let mut pre_computed_array_with_eq: Vec<Vec<EF>> = vec![vec![]; round_small_val];
+                for i in 1..matrix_polynomials.len() {
+                    let matrix_i_column_values = matrix_polynomials[i]
+                        .evaluation_rows
+                        .iter()
+                        .map(|row| row[column_idx])
+                        .collect::<Vec<BF>>();
+                    let precomputed_value_i = (0..num_product_terms)
+                        .map(|j| {
+                            MatrixPolynomial::compute_merkle_root(
+                                &matrix_i_column_values,
+                                j,
+                                mappings,
+                            )
+                        })
+                        .collect::<Vec<BF>>();
 
-        for round_number in (1..=round_small_val).rev() {
-            // Now lets squash the compressed witness matrix rows to get a single row
-            // Get the eq 1 right evaluations for this round
-            // Lets start by some assertions on the sizes
-            let eq_1_right_for_round = &eq_1_right_staged_evals[round_number - 1];
-            let eq_1_right_size = eq_1_right_for_round.len();
-            let round_size = num_evals.pow(round_number as u32);
-            assert_eq!(compressed_witness_with_eq_2.no_of_rows, round_size);
-            assert_eq!(compressed_witness_with_eq_2.no_of_columns, eq_1_right_size);
+                    // Update the precomputed column with the new values
+                    cumulative_column
+                        .iter_mut()
+                        .zip(&precomputed_value_i)
+                        .for_each(|(a, b)| *a = mult_bb(a, b));
+                }
 
-            // Now multiply the resulting matrix with the eq1 evaluations
-            let mut compressed_witness_eq_1_eq_2: Vec<EF> = Vec::with_capacity(round_size);
-            for witness_row in compressed_witness_with_eq_2.evaluation_rows.iter() {
-                assert_eq!(witness_row.len(), eq_1_right_size);
-                let ip = witness_row
+                // Lets now multiply the eq2 evaluation for this column
+                let eq_2_evaluation = eq_2_evals[column_idx_in_chunk];
+                let cumulative_column_with_eq_2 = cumulative_column
                     .iter()
-                    .zip(eq_1_right_for_round.iter())
-                    .map(|(w_val, eq_1_challenge)| mult_ee(w_val, eq_1_challenge))
-                    .sum();
-                compressed_witness_eq_1_eq_2.push(ip);
+                    .map(|a| mult_be(a, &eq_2_evaluation))
+                    .collect::<Vec<EF>>();
+
+                // Add this cumulative column to the chunk accumulator
+                assert_eq!(chunk_accumulator.len(), cumulative_column_with_eq_2.len());
+                chunk_accumulator
+                    .iter_mut()
+                    .zip(&cumulative_column_with_eq_2)
+                    .for_each(|(a, b)| *a += *b);
             }
 
-            // Push the compressed witness matrix for this round to the pre-computed array
-            pre_computed_array_with_eq[round_number - 1] = compressed_witness_eq_1_eq_2;
+            // Move the chunk accumulator to a matrix polynomial
+            let mut chunk_accumulator_matrix = MatrixPolynomial::from_column(&chunk_accumulator);
 
-            // Update extracted witness for next round
-            compressed_witness_with_eq_2.extract_submatrix(num_evals, projection_mapping_indices);
+            // Now we need to multiply the chunk accumulator with the eq1 evaluations
+            for round_index in (0..round_small_val).rev() {
+                let round_accumulator = &mut precomputed_accumulators[round_index];
+                let round_accumulator_size = round_accumulator.len();
+                assert_eq!(round_accumulator_size, chunk_accumulator_matrix.no_of_rows);
+
+                // Fetch the correct eq1 evaluations for this round
+                let eq_1_right_for_round: Vec<EF> = eq_1_right_staged_evals[round_index]
+                    .chunks(num_chunks)
+                    .filter_map(|chunk| chunk.get(chunk_index).cloned())
+                    .collect();
+                assert_eq!(
+                    eq_1_right_for_round.len(),
+                    chunk_accumulator_matrix.no_of_columns
+                );
+
+                // Now multiply the resulting matrix with the eq1 evaluations
+                for (w_row_idx, witness_row) in
+                    chunk_accumulator_matrix.evaluation_rows.iter().enumerate()
+                {
+                    assert_eq!(witness_row.len(), eq_1_right_for_round.len());
+                    let ip = witness_row
+                        .iter()
+                        .zip(eq_1_right_for_round.iter())
+                        .map(|(w_val, eq_1_challenge)| mult_ee(w_val, eq_1_challenge))
+                        .sum();
+                    round_accumulator[w_row_idx] += ip;
+                }
+
+                // Update the chunk accumulator for next round
+                chunk_accumulator_matrix.extract_submatrix(num_evals, projection_mapping_indices);
+            }
         }
 
         // Now we will start the actual sumcheck protocol
@@ -357,7 +397,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             // We use given projection mapping indices to know which witness terms to combine from
             // the pre-computed array of size (d + 1)^t
             let precomputed_array_for_this_round: &Vec<EF> =
-                &pre_computed_array_with_eq[round_num - 1];
+                &precomputed_accumulators[round_num - 1];
             assert_eq!(precomputed_array_for_this_round.len(), round_size);
             assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
 
