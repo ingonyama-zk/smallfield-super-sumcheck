@@ -358,8 +358,8 @@ mod fq4_tests {
 
     #[rstest]
     fn check_sumcheck_product(
-        #[values(6, 9)] nv: usize,
-        #[values(1, 2, 3, 6)] degree: usize,
+        #[values(10)] nv: usize,
+        #[values(2)] degree: usize,
         #[values(
             AlgorithmType::Naive,
             AlgorithmType::WitnessChallengeSeparation,

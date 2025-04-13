@@ -1,6 +1,6 @@
 use crate::{
     btf_transcript::TFTranscriptProtocol, data_structures::LinearLagrangeList,
-    tower_fields::TowerField, IPForMLSumcheck,
+    tower_fields::TowerField, track_algorithm_memory, IPForMLSumcheck,
 };
 use ark_std::{log2, vec::Vec};
 use merlin::Transcript;
@@ -177,15 +177,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         };
 
         match prover_state.algo {
-            AlgorithmType::Naive => Self::prove_with_naive_algorithm::<EC, BC, T>(
-                prover_state,
-                &ef_combine_function,
-                &bf_combine_function,
-                transcript,
-                &mut r_polys,
-                to_ef,
-            ),
-            AlgorithmType::WitnessChallengeSeparation => {
+            // track memory in the prover
+            AlgorithmType::Naive => track_algorithm_memory("algo_1", || {
+                Self::prove_with_naive_algorithm::<EC, BC, T>(
+                    prover_state,
+                    &ef_combine_function,
+                    &bf_combine_function,
+                    transcript,
+                    &mut r_polys,
+                    to_ef,
+                )
+            }),
+            AlgorithmType::WitnessChallengeSeparation => track_algorithm_memory("algo_2", || {
                 Self::prove_with_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
                     prover_state,
                     &bf_combine_function,
@@ -195,8 +198,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     &add_ee,
                     &mult_ee,
                 )
-            }
-            AlgorithmType::Precomputation => {
+            }),
+            AlgorithmType::Precomputation => track_algorithm_memory("algo_3", || {
                 Self::prove_with_precomputation_agorithm::<BE, EE, BB, EC>(
                     prover_state,
                     transcript,
@@ -207,42 +210,48 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     mult_bb,
                     ef_combine_function,
                 )
-            }
-            AlgorithmType::ToomCook => Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
-                prover_state,
-                transcript,
-                &mut r_polys,
-                num_round_small_val,
-                mult_be,
-                mult_ee,
-                mult_bb,
-                mappings.unwrap(),
-                projection_mapping_indices.unwrap(),
-                interpolation_maps_bf.unwrap(),
-                interpolation_maps_ef.unwrap(),
-                ef_combine_function,
-            ),
-            AlgorithmType::NaiveWithEq => Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
-                prover_state,
-                &ef_combine_function,
-                transcript,
-                &mut r_polys,
-                eq_challenges.unwrap(),
-                to_ef,
-            ),
-            AlgorithmType::WitnessChallengeSeparationWithEq => {
-                Self::prove_with_eq_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
+            }),
+            AlgorithmType::ToomCook => track_algorithm_memory("algo_4", || {
+                Self::prove_with_toom_cook_agorithm::<BE, EE, BB, EC>(
                     prover_state,
-                    &bf_combine_function,
+                    transcript,
+                    &mut r_polys,
+                    num_round_small_val,
+                    mult_be,
+                    mult_ee,
+                    mult_bb,
+                    mappings.unwrap(),
+                    projection_mapping_indices.unwrap(),
+                    interpolation_maps_bf.unwrap(),
+                    interpolation_maps_ef.unwrap(),
+                    ef_combine_function,
+                )
+            }),
+            AlgorithmType::NaiveWithEq => track_algorithm_memory("algo_1_eq", || {
+                Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
+                    prover_state,
+                    &ef_combine_function,
                     transcript,
                     &mut r_polys,
                     eq_challenges.unwrap(),
-                    mult_be,
-                    &add_ee,
-                    &mult_ee,
+                    to_ef,
                 )
+            }),
+            AlgorithmType::WitnessChallengeSeparationWithEq => {
+                track_algorithm_memory("algo_2_eq", || {
+                    Self::prove_with_eq_witness_challenge_sep_agorithm::<BC, BE, AEE, EE>(
+                        prover_state,
+                        &bf_combine_function,
+                        transcript,
+                        &mut r_polys,
+                        eq_challenges.unwrap(),
+                        mult_be,
+                        &add_ee,
+                        &mult_ee,
+                    )
+                })
             }
-            AlgorithmType::PrecomputationWithEq => {
+            AlgorithmType::PrecomputationWithEq => track_algorithm_memory("algo_3_eq", || {
                 Self::prove_with_eq_precomputation_agorithm::<BE, EE, BB, EC>(
                     prover_state,
                     transcript,
@@ -254,8 +263,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     mult_bb,
                     ef_combine_function,
                 )
-            }
-            AlgorithmType::ToomCookWithEq => {
+            }),
+            AlgorithmType::ToomCookWithEq => track_algorithm_memory("algo_4_eq", || {
                 Self::prove_with_eq_toom_cook_agorithm::<BE, EE, BB, EC>(
                     prover_state,
                     transcript,
@@ -271,7 +280,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     interpolation_maps_ef.unwrap(),
                     ef_combine_function,
                 )
-            }
+            }),
         }
 
         SumcheckProof {
