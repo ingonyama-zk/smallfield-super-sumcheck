@@ -96,12 +96,11 @@ pub mod test_helpers {
             .iter()
             .fold(EF::zero(), |acc, ph| acc + ph.clone());
 
-        let sumcheck_degree = is_algo_with_eq_poly.then(|| degree + 1).unwrap_or(degree);
         let prover_state: ProverState<EF, BF> = IPForMLSumcheck::<EF, BF>::prover_init(
             &polynomials,
             &polynomials_int,
-            sumcheck_degree,
             algorithm,
+            eq_challenges.clone(),
         );
 
         (prover_state, claimed_sum, eq_challenges)

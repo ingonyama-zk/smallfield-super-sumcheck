@@ -39,14 +39,14 @@ pub enum AlgorithmType {
 pub struct ProverState<EF: Field, BF: PrimeField> {
     /// sampled randomness (for each round) given by the verifier
     pub randomness: Vec<EF>,
-    /// Stores a list of multilinear extensions
+    /// Stores a list of multilinear extensions (witness polynomials)
     pub state_polynomials: Vec<LinearLagrangeList<BF>>,
     /// Stores a list of multilinear extensions
     pub state_polynomials_int: Vec<Vec<i64>>,
+    /// Stores eq poly challenges if the witness polynomials are multiplied by an equality polynomial
+    pub eq_challenges: Option<Vec<EF>>,
     /// Number of variables
     pub num_vars: usize,
-    /// Max number of multiplicands in a product
-    pub max_multiplicands: usize,
     /// The current round number
     pub round: usize,
     /// Algorithm type for small field sumcheck
@@ -61,29 +61,11 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         polynomials_int: &Vec<Vec<i64>>,
         sumcheck_poly_degree: usize,
         algorithm: AlgorithmType,
+        eq_challenges: Option<Vec<EF>>,
     ) -> ProverState<EF, BF> {
         // sanity check 1: no polynomials case must not be allowed.
         if polynomials.len() == 0 {
             panic!("Cannot prove empty input polynomials.")
-        }
-
-        // sanity check 2: degree is consistent with the number of polynomials.
-        if algorithm == AlgorithmType::PrecomputationWithEq
-            || algorithm == AlgorithmType::ToomCookWithEq
-            || algorithm == AlgorithmType::NaiveWithEq
-            || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq
-        {
-            assert_eq!(
-                sumcheck_poly_degree,
-                polynomials.len() + 1,
-                "Degree of the sumcheck polynomial does not match number of polynomials, maybe you did not consider the equality polynomial."
-            );
-        } else {
-            assert_eq!(
-                sumcheck_poly_degree,
-                polynomials.len(),
-                "Degree of the sumcheck polynomial does not match number of polynomials."
-            );
         }
 
         // sanity check 2: all polynomial evaluations must be of the same size.
@@ -115,13 +97,29 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         assert_eq!(polynomials_as_vector, polynomials_int_as_field_vector);
 
+        // sanity check 4: check if eq challenges length is equal to the number of variables
         let num_variables: usize = log2(2 * problem_size).try_into().unwrap();
+        let eq_challenges_ext = if eq_challenges.is_some() {
+            assert!(
+                algorithm == AlgorithmType::NaiveWithEq
+                    || algorithm == AlgorithmType::PrecomputationWithEq
+                    || algorithm == AlgorithmType::ToomCookWithEq
+                    || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq,
+                "Eq challenges are only allowed for algorithms with Eq"
+            );
+            let eq_challenges_extracted = eq_challenges.unwrap();
+            assert_eq!(eq_challenges_extracted.len(), num_variables);
+            Some(eq_challenges_extracted)
+        } else {
+            None
+        };
+
         ProverState {
             randomness: Vec::with_capacity(num_variables),
             state_polynomials: polynomials.to_vec(),
             state_polynomials_int: polynomials_int.clone(),
+            eq_challenges: eq_challenges_ext,
             num_vars: num_variables,
-            max_multiplicands: sumcheck_poly_degree,
             round: 0,
             algo: algorithm,
         }
@@ -146,11 +144,11 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_bb: &BB,
         round_small_val: Option<usize>,
         eq_challenges: Option<&Vec<EF>>,
-        mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF>>>,
+        mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>>,
         mappings_int: Option<&Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,
-        interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
-        interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF>>>,
+        interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF + Send + Sync>>>,
+        interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF + Send + Sync>>>,
     ) -> SumcheckProof<EF>
     where
         BC: Fn(&Vec<BF>) -> EF + Sync,
@@ -162,29 +160,20 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         BB: Fn(&BF, &BF) -> BF + Sync,
     {
         // Initiate the transcript with the protocol name
+        let degree = prover_state.state_polynomials.len();
         <Transcript as ExtensionTranscriptProtocol<EF, BF>>::sumcheck_proof_domain_sep(
             transcript,
             prover_state.num_vars as u64,
-            prover_state.max_multiplicands as u64,
+            degree as u64,
         );
 
         // Declare r_polys and initialise it with 0s
-        let r_degree = prover_state.max_multiplicands;
+        // TODO: check with Justin/Quang if this is fiat-shamir-safe as we aren't including r(0)/claimed sum in fiat shamir.
+        // Each round, the prover only sends the following d evaluations: [r(∞), r(1), r(2), ..., r(d - 1)]
+        // The verifier can compute r(0) by herself as round_sum = r(0) + r(1).
         let mut r_polys: Vec<Vec<EF>> = (0..prover_state.num_vars)
-            .map(|_| vec![EF::zero(); r_degree])
+            .map(|_| vec![EF::zero(); degree])
             .collect();
-
-        // Check if eq challenges length is equal to the number of variables
-        if let Some(eq_challenges) = eq_challenges {
-            assert!(
-                prover_state.algo == AlgorithmType::NaiveWithEq
-                    || prover_state.algo == AlgorithmType::PrecomputationWithEq
-                    || prover_state.algo == AlgorithmType::ToomCookWithEq
-                    || prover_state.algo == AlgorithmType::WitnessChallengeSeparationWithEq,
-                "Eq challenges are only allowed for algorithms with Eq"
-            );
-            assert_eq!(eq_challenges.len(), prover_state.num_vars);
-        }
 
         // Extract threshold round
         let num_round_small_val = match round_small_val {
@@ -255,7 +244,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 &ef_combine_function,
                 transcript,
                 &mut r_polys,
-                eq_challenges.unwrap(),
                 to_ef,
             ),
             AlgorithmType::WitnessChallengeSeparationWithEq => {
@@ -264,7 +252,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     &bf_combine_function,
                     transcript,
                     &mut r_polys,
-                    eq_challenges.unwrap(),
                     mult_be,
                     &add_ee,
                     &mult_ee,
@@ -275,7 +262,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     prover_state,
                     transcript,
                     &mut r_polys,
-                    &eq_challenges.unwrap(),
                     num_round_small_val,
                     mult_be,
                     mult_ee,
@@ -288,7 +274,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     prover_state,
                     transcript,
                     &mut r_polys,
-                    &eq_challenges.unwrap(),
                     num_round_small_val,
                     mult_be,
                     mult_ee,
@@ -305,7 +290,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         SumcheckProof {
             num_vars: prover_state.num_vars,
-            degree: r_degree,
+            degree,
             round_polynomials: r_polys,
         }
     }
