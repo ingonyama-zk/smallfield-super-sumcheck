@@ -38,10 +38,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // row 1: [ p(1, 1, x) ]
         //
         // and so on.
-        let r_degree = prover_state.max_multiplicands;
-        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(r_degree);
+        //
+        // The degree of the round polynomial is the number of polynomials being multiplied since
+        // we are only dealing with product-sumcheck. In other cases, number of polynomials may not equal the degree.
+        let r_degree = prover_state.state_polynomials.len();
+        let num_witness_poly = prover_state.state_polynomials.len();
+        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> =
+            Vec::with_capacity(num_witness_poly);
 
-        for i in 0..r_degree {
+        for i in 0..num_witness_poly {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));

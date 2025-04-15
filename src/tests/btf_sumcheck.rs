@@ -138,7 +138,6 @@ mod fq4_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
-            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&projective_map_indices),
             Some(&imaps_base),

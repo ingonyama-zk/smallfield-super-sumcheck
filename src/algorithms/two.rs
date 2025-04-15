@@ -22,8 +22,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         AEE: Fn(&EF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
     {
-        // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
-        let r_degree = prover_state.max_multiplicands;
+        // The degree of the round polynomial is the number of polynomials being multiplied since
+        // we are only dealing with product-sumcheck. In other cases, number of polynomials may not equal the degree.
+        let r_degree = prover_state.state_polynomials.len();
+        let num_witness_poly = prover_state.state_polynomials.len();
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
         let alpha = Self::compute_round_polynomial::<BC, BF>(
@@ -49,9 +51,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         //
         // and so on.
         let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> =
-            Vec::with_capacity(prover_state.max_multiplicands);
+            Vec::with_capacity(num_witness_poly);
 
-        for i in 0..prover_state.max_multiplicands {
+        for i in 0..num_witness_poly {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));
@@ -170,7 +172,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             // Heighten the witness polynomial matrices
-            for j in 0..prover_state.max_multiplicands {
+            for j in 0..num_witness_poly {
                 matrix_polynomials[j].heighten();
             }
         }

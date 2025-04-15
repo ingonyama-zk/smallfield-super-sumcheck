@@ -64,7 +64,7 @@ mod simple_extension_tests {
         let polynomials: Vec<LinearLagrangeList<BF>> =
             vec![LinearLagrangeList::<BF>::from_vector(&evaluations)];
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 1, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
@@ -78,7 +78,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -156,7 +155,7 @@ mod simple_extension_tests {
         ];
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 2, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -168,7 +167,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -252,8 +250,11 @@ mod simple_extension_tests {
             .map(|i| evaluations_a[i] * evaluations_b[i] * eq_poly[i])
             .fold(EF::zero(), |acc, val| acc + val);
 
-        let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::NaiveWithEq);
+        let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
+            &polynomials,
+            AlgorithmType::NaiveWithEq,
+            Some(eq_challenges),
+        );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -266,7 +267,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
-            Some(&eq_challenges),
             None,
             None,
             None,
@@ -344,8 +344,8 @@ mod simple_extension_tests {
 
         let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
             &polynomials,
-            2,
             AlgorithmType::WitnessChallengeSeparation,
+            None,
         );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
@@ -358,7 +358,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -444,8 +443,8 @@ mod simple_extension_tests {
 
         let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
             &polynomials,
-            3,
             AlgorithmType::WitnessChallengeSeparationWithEq,
+            Some(eq_challenges),
         );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
@@ -459,7 +458,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
-            Some(&eq_challenges),
             None,
             None,
             None,
@@ -538,7 +536,7 @@ mod simple_extension_tests {
             LinearLagrangeList::<BF>::from_vector(&evaluations_c),
         ];
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Precomputation);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Precomputation, None);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -555,11 +553,10 @@ mod simple_extension_tests {
             None,
             None,
             None,
-            None,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -571,7 +568,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -671,8 +667,11 @@ mod simple_extension_tests {
             .map(|i| evaluations_a[i] * evaluations_b[i] * evaluations_c[i] * fourth_poly[i])
             .fold(EF::zero(), |acc, val| acc + val);
 
-        let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::PrecomputationWithEq);
+        let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
+            &polynomials,
+            AlgorithmType::PrecomputationWithEq,
+            Some(eq_challenges),
+        );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -685,7 +684,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             Some(3),
-            Some(&eq_challenges),
             None,
             None,
             None,
@@ -696,7 +694,7 @@ mod simple_extension_tests {
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&new_polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -708,7 +706,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -861,8 +858,11 @@ mod simple_extension_tests {
         let imaps_base = get_interpolation_maps::<BF>();
         let imaps_ext = get_interpolation_maps::<EF>();
 
-        let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCookWithEq);
+        let mut prover_state: ProverState<EF, BF> = IPForMLSumcheck::prover_init(
+            &polynomials,
+            AlgorithmType::ToomCookWithEq,
+            Some(dummy_eq_challenges),
+        );
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -875,7 +875,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             Some(3),
-            Some(&dummy_eq_challenges),
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -886,7 +885,7 @@ mod simple_extension_tests {
         new_polynomials.push(LinearLagrangeList::<BF>::from_vector(&fourth_poly));
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&new_polynomials, 4, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&new_polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -898,7 +897,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -1044,7 +1042,7 @@ mod simple_extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::ToomCook);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::ToomCook, None);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1057,7 +1055,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
-            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -1065,7 +1062,7 @@ mod simple_extension_tests {
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 3, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -1077,7 +1074,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -1238,7 +1234,7 @@ mod simple_extension_tests {
         let imaps_ext = get_interpolation_maps::<EF>();
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::ToomCook);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::ToomCook, None);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1251,7 +1247,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             None,
-            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -1259,7 +1254,7 @@ mod simple_extension_tests {
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 4, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -1271,7 +1266,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -1434,7 +1428,7 @@ mod simple_extension_tests {
         let imaps_ext = get_maps_from_matrix::<EF>(&inter_matrix_ef);
 
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 5, AlgorithmType::ToomCook);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::ToomCook, None);
         let mut prover_transcript = Transcript::new(b"test_product_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1447,7 +1441,6 @@ mod simple_extension_tests {
             &mult_ee,
             &mult_bb,
             Some(3),
-            None,
             Some(&maps),
             Some(&projective_map_indices),
             Some(&imaps_base),
@@ -1455,7 +1448,7 @@ mod simple_extension_tests {
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, 5, AlgorithmType::Naive);
+            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
         let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state_dup,
@@ -1467,7 +1460,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,
@@ -1565,7 +1557,7 @@ mod simple_extension_tests {
             LinearLagrangeList::<BF>::from_vector(&poly_e),
         ];
         let mut prover_state: ProverState<EF, BF> =
-            IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, 3, AlgorithmType::Naive);
+            IPForMLSumcheck::<EF, BF>::prover_init(&polynomials, AlgorithmType::Naive, None);
         let mut prover_transcript = Transcript::new(b"test_r1cs_sumcheck");
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
@@ -1577,7 +1569,6 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
-            None,
             None,
             None,
             None,

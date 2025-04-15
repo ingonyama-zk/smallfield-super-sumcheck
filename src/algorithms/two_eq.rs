@@ -1,5 +1,3 @@
-use std::os::macos::raw::stat;
-
 use merlin::Transcript;
 
 use crate::btf_transcript::TFTranscriptProtocol;
@@ -16,7 +14,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         bf_combine_function: &BC,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
-        eq_challenges: &Vec<EF>,
         mult_be: &BE,
         add_ee: &AEE,
         mult_ee: &EE,
@@ -27,12 +24,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EE: Fn(&EF, &EF) -> EF + Sync,
     {
         // Compute the equality polynomial from its basis.
-        let eq_poly = EqPoly::new(eq_challenges.to_vec());
+        assert!(
+            prover_state.eq_challenges.is_some(),
+            "Equality poly challenges cannot be `None`."
+        );
+        let eq_poly = EqPoly::new(prover_state.eq_challenges.clone().unwrap().to_vec());
         let eq_evals = eq_poly.compute_evals(false);
         let eq_state_poly = LinearLagrangeList::from_vector(&eq_evals);
 
-        // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
-        let r_degree = prover_state.max_multiplicands;
+        // The degree of the round polynomial is the number of polynomials being multiplied since
+        // we are only dealing with product-sumcheck. In other cases, number of polynomials may not equal the degree.
+        let r_degree = prover_state.state_polynomials.len();
+        let num_witness_poly = prover_state.state_polynomials.len();
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
         // Note that we still need to multiply the equality polynomial with the base field polynomials.
@@ -59,10 +62,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // row 1: [ p(1, 1, x) ]
         //
         // and so on.
-        let num_polys = prover_state.state_polynomials.len();
-        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> = Vec::with_capacity(num_polys);
+        let mut matrix_polynomials: Vec<MatrixPolynomial<BF>> =
+            Vec::with_capacity(num_witness_poly);
 
-        for i in 0..num_polys {
+        for i in 0..num_witness_poly {
             matrix_polynomials.push(MatrixPolynomial::from_linear_lagrange_list(
                 &prover_state.state_polynomials[i],
             ));
@@ -224,7 +227,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
 
             // Heighten the witness polynomial matrices
-            for j in 0..num_polys {
+            for j in 0..num_witness_poly {
                 matrix_polynomials[j].heighten();
             }
             eq_matrix_polynomial.heighten();

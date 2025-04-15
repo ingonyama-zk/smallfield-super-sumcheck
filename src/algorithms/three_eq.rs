@@ -15,7 +15,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         prover_state: &mut ProverState<EF, BF>,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
-        eq_challenges: &Vec<EF>,
         round_small_val: usize,
         mult_be: &BE,
         mult_ee: &EE,
@@ -33,6 +32,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         assert!(round_small_val <= prover_state.num_vars / 2);
 
         // Number of eq challenges must be equal to the number of rounds
+        assert!(
+            prover_state.eq_challenges.is_some(),
+            "Equality poly challenges cannot be `None`."
+        );
+        let eq_challenges = prover_state.eq_challenges.clone().unwrap();
         assert_eq!(eq_challenges.len(), prover_state.num_vars);
 
         // First, lets compute the challenge pre-computation terms
@@ -165,9 +169,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Pre-compute the witness terms multiplied by the eq1 and eq2 evaluations
         // TODO: we might be allocating unncecessary memory for the last round (i.e., round t)
-        let r_degree = prover_state.max_multiplicands;
         let num_witness_polys = prover_state.state_polynomials.len();
-        assert_eq!(r_degree, num_witness_polys + 1); // sumcheck_poly = eq * w_1 * ... * w_d
 
         let num_round_poly_evals = num_witness_polys + 1;
         let mut pre_computed_array_with_eq: Vec<Vec<Vec<EF>>> = vec![vec![]; num_round_poly_evals];
@@ -618,7 +620,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
-                r_degree,
+                num_witness_polys,
                 &ef_combine_function,
                 transcript,
             );

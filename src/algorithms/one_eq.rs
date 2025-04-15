@@ -123,7 +123,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         ef_combine_function: &EC,
         transcript: &mut Transcript,
         round_polynomials: &mut Vec<Vec<EF>>,
-        eq_challenges: &Vec<EF>,
         to_ef: &T,
     ) where
         EC: Fn(&Vec<EF>) -> EF + Sync,
@@ -133,12 +132,16 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EF: Send + Sync,
     {
         // Compute the equality polynomial from its basis.
-        let eq_poly = EqPoly::new(eq_challenges.to_vec());
+        assert!(
+            prover_state.eq_challenges.is_some(),
+            "Equality poly challenges cannot be `None`."
+        );
+        let eq_poly = EqPoly::new(prover_state.eq_challenges.clone().unwrap().to_vec());
         let eq_evals = eq_poly.compute_evals(false);
         let mut eq_state_poly = LinearLagrangeList::from_vector(&eq_evals);
 
-        // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
-        let round_polynomial_degree = prover_state.max_multiplicands;
+        // The degree of the round polynomial is the number of polynomials being multiplied.
+        let r_degree = prover_state.state_polynomials.len();
 
         // For all rounds, all of the data will be extension field elements as we're multiplying base
         // field polynomials with the extension field eq polynomial. So we copy all of the prover state polynomials
@@ -158,7 +161,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 &ef_state_polynomials,
                 &eq_state_poly,
                 round_polynomials,
-                round_polynomial_degree,
+                r_degree,
                 &ef_combine_function,
                 transcript,
             );

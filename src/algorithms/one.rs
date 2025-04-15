@@ -108,8 +108,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
     {
-        // The degree of the round polynomial is the highest-degree multiplicand in the combine function.
-        let r_degree = prover_state.max_multiplicands;
+        // The degree of the round polynomial is the number of polynomials being multiplied.
+        let r_degree = prover_state.state_polynomials.len();
 
         // Phase 1: Process round 1 separately as we need to only perform bb multiplications.
         let alpha = Self::compute_round_polynomial::<BC, BF>(
