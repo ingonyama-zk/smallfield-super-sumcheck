@@ -196,7 +196,53 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             assert_eq!(precomputed_array_for_this_round.len(), round_size);
             assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
 
-            for k in 0..num_evals as u64 {
+            // Case k = 0:
+            //
+            // Lets evaluate at k = 0 as a special case, as we can simplify computation.
+            // We want to compute the following lagrange poly evals for r = 0. (In this example, we set d = 4.)
+            // TODO: check example matrix
+            //
+            // [L₀(r), L₁(r), L₂(r), ..., Lₔ(r)] =  [1, r, r², ..., rᵈ] * ⌈  1  0  0  0  0 ⌉   ⌈   6   0   0   0   0 ⌉
+            //                                                            │ -4  1  0  0  0 │   │  -3   6  -2  -1  12 │
+            //                                                            │  6 -3  1  0  0 │ * │  -6   3   3   0  -6 │
+            //                                                            │ -4  3 -2  1  0 │   │   3  -3  -1   1 -12 │
+            //                                                            ⌊  1 -1  1 -1  1 ⌋   ⌊   0   0   0   0   6 ⌋
+            //                                                            |<-- bin_exp --->|   |<-- interpolation -->|
+            //
+            // Since [1, r, r², ..., rᵈ] = [1, 0, 0, ..., 0], we have:
+            //
+            // [L₀(0), L₁(0), L₂(0), ..., Lₔ(0)] := [ (bin_exp * interpolation)[0][0]  0  0  0  0 ]
+            //
+            // Decompose j as (j_p, j_{p-1}, ...., j_2, j_1)
+            // j_1 is used to compute L_{j_1}(k) so we treat it separately
+            // Rest of the indices are used to fetch respective challenge terms
+            // Thus, we iterate over only (j_2, j_3, ..., j_p) in round p.
+            // This results in a total of (d + 1)ᵖ⁻¹ be multiplications in round p.
+            //
+            let mut unit_vec_0 = vec![BF::zero(); num_evals];
+            unit_vec_0[0] = BF::one();
+            let interpolation_value_0 = interpolation_maps_bf[0](&unit_vec_0);
+            for j in 0..(round_size / num_evals) {
+                let local_witness_accumulator =
+                    interpolation_value_0 * precomputed_array_for_this_round[j * num_evals];
+
+                // Fetch the following term using j from the already-computed array
+                // that contains multiplications of challenge terms.
+                //
+                // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
+                //
+                // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
+                //
+                let local_interpolated_challenge =
+                    interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
+
+                // Accumulate round polynomial evaluation at k
+                round_polynomials[round_num - 1][0] +=
+                    mult_be(&local_witness_accumulator, &local_interpolated_challenge);
+            }
+
+            // Cases k = 2, 3, ..., d - 1
+            for k in 2..=(r_degree - 1) {
                 let mut scalar_matrix: MatrixPolynomial<BF> = MatrixPolynomial::<BF> {
                     no_of_rows: 0,
                     no_of_columns: num_evals,
@@ -240,11 +286,43 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                         interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
 
                     // Accumulate round polynomial evaluation at k
-                    round_polynomials[round_num - 1][k as usize] +=
+                    round_polynomials[round_num - 1][k as usize - 1] +=
                         mult_be(&local_witness_accumulator, &local_interpolated_challenge);
                 }
             }
 
+            // Case k = ∞
+            //
+            // We substitute r = ∞ in the above lagrange expression,
+            // and since [1, r, r², ..., rᵈ] = [0, 0, 0, ..., 1], we have:
+            //
+            // [L₀(∞), L₁(∞), L₂(∞), ..., Lₔ(∞)] := [ 0  0  (bin_exp * interpolation)[d][1]  0  0 ]
+            //
+            // Note the non-zero value is always at index 2 for k = ∞.
+            // TODO: (bin_exp * interpolation)[0][0] and (bin_exp * interpolation)[d][1] are both equal to scaled determinant!
+            let mut unit_vec_infty = vec![BF::zero(); num_evals];
+            unit_vec_infty[num_evals - 1] = BF::one();
+            let interpolation_value_infty = interpolation_maps_bf[2](&unit_vec_infty);
+            for j in 0..(round_size / num_evals) {
+                let local_witness_accumulator =
+                    interpolation_value_infty * precomputed_array_for_this_round[j * num_evals + 1];
+
+                // Fetch the following term using j from the already-computed array
+                // that contains multiplications of challenge terms.
+                //
+                // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
+                //
+                // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
+                //
+                let local_interpolated_challenge =
+                    interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
+
+                // Accumulate round polynomial evaluation at k = ∞
+                round_polynomials[round_num - 1][r_degree - 1] +=
+                    mult_be(&local_witness_accumulator, &local_interpolated_challenge);
+            }
+
+            // Now we've got: s(0) s(2) s(3) ... s(d - 1) s(∞) and the prover sends these d evaluations
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
