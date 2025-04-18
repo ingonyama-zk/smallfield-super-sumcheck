@@ -12,6 +12,7 @@ mod simple_extension_tests {
     use crate::IPForMLSumcheck;
     use ark_std::vec::Vec;
     use merlin::Transcript;
+    use num::One;
     use num::Zero;
 
     type BF = BiniusTowerField;
@@ -78,6 +79,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -167,6 +169,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -271,6 +274,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
@@ -358,6 +362,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -462,6 +467,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
@@ -553,6 +559,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -568,6 +575,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -688,6 +696,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
+            None,
         );
 
         let mut new_polynomials = polynomials.clone();
@@ -706,6 +715,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -879,6 +889,7 @@ mod simple_extension_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::one()),
         );
 
         let mut new_polynomials = polynomials.clone();
@@ -897,6 +908,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -1059,6 +1071,7 @@ mod simple_extension_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::one()),
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -1074,6 +1087,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -1251,6 +1265,7 @@ mod simple_extension_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::one()),
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -1266,6 +1281,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -1445,6 +1461,7 @@ mod simple_extension_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::new(3 as u128, None)),
         );
 
         let mut prover_state_dup: ProverState<EF, BF> =
@@ -1460,6 +1477,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,
@@ -1569,6 +1587,7 @@ mod simple_extension_tests {
             &add_ee,
             &mult_ee,
             &mult_bb,
+            None,
             None,
             None,
             None,

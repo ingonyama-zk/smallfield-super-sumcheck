@@ -142,6 +142,7 @@ mod fq4_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(scaled_det),
         );
         let elapsed = start.elapsed();
         println!("prove_time: {:.2?}", elapsed);

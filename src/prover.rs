@@ -120,6 +120,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         projection_mapping_indices: Option<&Vec<usize>>,
         interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
         interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF>>>,
+        scaled_determinant: Option<BF>,
     ) -> SumcheckProof<EF>
     where
         BC: Fn(&Vec<BF>) -> EF + Sync,
@@ -208,6 +209,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 interpolation_maps_bf.unwrap(),
                 interpolation_maps_ef.unwrap(),
                 ef_combine_function,
+                &scaled_determinant.unwrap(),
             ),
             AlgorithmType::NaiveWithEq => Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
                 prover_state,
