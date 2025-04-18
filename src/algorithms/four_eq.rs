@@ -344,13 +344,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             // Denoted by (A) in the equation above
             if round_num > 1 {
                 let eq_challenge = eq_challenges[round_num - 2];
-                let one_minus_eq_challenge = EF::one() - eq_challenge;
                 let prev_round_challenge = challenge_vector.last().unwrap();
-                let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
 
-                // TODO: can use one ee_mult instead of two here!
-                let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
-                    + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+                // (1 - e)(1 - r) = 1 - e - r + er
+                let eq_times_prev_round_challenge = mult_ee(&eq_challenge, prev_round_challenge);
+                let eq_1_left_and_challenge = eq_times_prev_round_challenge
+                    + eq_times_prev_round_challenge
+                    - eq_challenge
+                    - *prev_round_challenge
+                    + EF::one();
                 eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
             }
 
@@ -375,14 +377,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 //
                 // We have the eq1 left evaluation in the eq1_left_cumulative variable
                 // Lets compute the eq1 centre evaluation (denoted by (B) in the equation above)
-                // TODO: can use one be_mult instead of two here!
+                // (1 - k)(1 - e) + ke = 2ke - k - e + 1
                 let k_val = BF::new(k as u128, Some(3));
-                let one_minus_k_val = BF::one() - k_val;
                 let eq_challenge_value = eq_challenges[round_num - 1];
-                let one_minus_eq_challenge_value = EF::one() - eq_challenge_value;
-                let eq_1_center_evaluation =
-                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
-                        + mult_be(&k_val, &eq_challenge_value);
+                let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
+                let eq_1_center_evaluation = k_times_eq_challenge_value
+                    + k_times_eq_challenge_value
+                    - EF::new(k as u128, None)
+                    - eq_challenge_value
+                    + EF::one();
 
                 //
                 // Compute the witness-challenge multiplication term for this round
@@ -535,13 +538,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Process next rounds until the (n / 2)th round
         for round_num in (round_small_val + 1)..=(prover_state.num_vars / 2) {
             // Compute the current eq1 left and challenge value
-            // TODO: can use one ee_mult instead of two here!
+            // er + (1 - e)(1 - r) = 2er - e - r + 1
             let eq_challenge = eq_challenges[round_num - 2];
-            let one_minus_eq_challenge = EF::one() - eq_challenge;
             let prev_round_challenge = challenge_vector.last().unwrap();
-            let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
-            let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
-                + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+            let eq_times_prev_round_challenge = mult_ee(&eq_challenge, prev_round_challenge);
+            let eq_1_left_and_challenge = eq_times_prev_round_challenge
+                + eq_times_prev_round_challenge
+                - eq_challenge
+                - *prev_round_challenge
+                + EF::one();
             eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
 
             let state_poly_size = ef_state_polynomials[0].list.len();
@@ -551,14 +556,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             for k in 0..num_evals {
                 // Compute the eq1 centre evaluation
-                // TODO: can use one be_mult instead of two here!
+                // (1 - k)(1 - e) + ke = 2ke - k - e + 1
                 let k_val = BF::new(k as u128, Some(3));
-                let one_minus_k_val = BF::one() - k_val;
                 let eq_challenge_value = eq_challenges[round_num - 1];
-                let one_minus_eq_challenge_value = EF::one() - eq_challenge_value;
-                let eq_1_center_evaluation =
-                    mult_be(&one_minus_k_val, &one_minus_eq_challenge_value)
-                        + mult_be(&k_val, &eq_challenge_value);
+                let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
+                let eq_1_center_evaluation = k_times_eq_challenge_value
+                    + k_times_eq_challenge_value
+                    - EF::new(k as u128, None)
+                    - eq_challenge_value
+                    + EF::one();
 
                 // Evaluation points
                 let k_val = EF::new(k as u128, None);
