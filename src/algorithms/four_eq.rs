@@ -532,8 +532,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
             .collect();
 
-        // TODO: PLEASE TEST TILL HERE.
-
         // Process next rounds until the (n / 2)th round
         for round_num in (round_small_val + 1)..=(prover_state.num_vars / 2) {
             // Compute the current eq1 left and challenge value

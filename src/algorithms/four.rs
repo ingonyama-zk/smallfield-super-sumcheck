@@ -156,15 +156,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             projection_mapping_indices,
         );
 
-        println!(
-            "precomputed_arrays_for_rounds len = {}",
-            precomputed_arrays_for_rounds.len()
-        );
-        println!(
-            "pre computed for rounds\n{:#?}",
-            precomputed_arrays_for_rounds
-        );
-
         // Initialise empty challenge matrix
         let mut challenge_matrix: MatrixPolynomial<EF> = MatrixPolynomial::<EF> {
             no_of_rows: 0,
