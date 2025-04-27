@@ -71,16 +71,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
-            // Received evaluations are s_i(0), s_i(2), ..., s_i(d-1), s_i(inf)
+            let s_degree = proof.degree; // Degree of the round polynomial s_i(X)
+            // Received evaluations are in format: [s(0), s(∞), s(2), ..., s(degree-1)]
             let received_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
 
-            // Expect d = proof.degree evaluations
-            if received_evaluations.len() != proof.degree {
+            // Expect message length to match degree
+            if received_evaluations.len() != s_degree {
                 return Err(SumcheckError::InvalidRoundPolynomial);
             }
 
             // Check rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
             //
+            // (The below is DEPRECATED, we no longer need to worry about scaling factors)
             // In case of toom-cook based sumcheck, we would instead check the following:
             // For i ∈ [1, t):
             //              rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
@@ -115,31 +117,40 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 None => expected_sum,
             };
 
+            // Extract s_i(0) and s_i(∞)
+            let round_poly_evaluation_at_0 = received_evaluations[0];
+            let round_poly_evaluation_at_inf = if s_degree > 1 {
+                received_evaluations[1]
+            } else {
+                // If degree is 1, s(inf) is implicitly 0 (or doesn't matter for interpolation)
+                EF::zero()
+            };
+
             // Derive s_i(1) using the expected sum: s_i(1) = modified_expected_sum - s_i(0)
             let derived_round_poly_evaluation_at_1 =
-                modified_expected_sum - received_evaluations[0];
+                modified_expected_sum - round_poly_evaluation_at_0;
 
-            // Extract s_i(inf)
-            let mut round_poly_evaluation_at_inf = EF::zero();
-            if proof.degree > 1 {
-                round_poly_evaluation_at_inf = received_evaluations[proof.degree - 1];
+            // Prepare evaluations for interpolation: [s(0), s(1), s(2), ..., s(degree-1)]
+            let mut evaluations_for_interpolation = Vec::with_capacity(s_degree);
+            evaluations_for_interpolation.push(round_poly_evaluation_at_0); // s(0)
+            evaluations_for_interpolation.push(derived_round_poly_evaluation_at_1); // s(1)
+            if s_degree > 2 {
+                // Add s(2)...s(degree-1) from indices 2.. onwards
+                evaluations_for_interpolation.extend_from_slice(&received_evaluations[2..]);
             }
 
-            // Reconstruct the evaluations vector [s_i(0), s_i(1), ..., s_i(d-1)] needed for interpolation
-            let mut evaluations_for_interpolation = received_evaluations.clone();
-            evaluations_for_interpolation.insert(1, derived_round_poly_evaluation_at_1); // Insert s_i(1)
-            evaluations_for_interpolation.remove(proof.degree - 1); // Remove s_i(inf)
             debug_assert_eq!(
                 evaluations_for_interpolation.len(),
-                proof.degree,
-                "Evaluations for interpolation should be of length d"
+                s_degree,
+                "Evaluations for interpolation should be of length s_degree"
             );
 
             // append the *prover's actual message* to the transcript
+            // Format: [s(0), s(∞), s(2), ..., s(degree-1)]
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
-                received_evaluations, // Use the received evaluations [s(0), s_i(2), ..., s(d-1), s(inf)]
+                received_evaluations,
             );
 
             // derive the verifier's challenge for the next round
@@ -150,8 +161,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
             // Compute r_{i}(α_i) using the interpolation formula with infinity
             expected_sum = barycentric_interpolation_with_infinity(
-                &evaluations_for_interpolation, // s(0)...s(d-1)
-                round_poly_evaluation_at_inf,   // s(inf)
+                &evaluations_for_interpolation, // [s(0), s(1), ..., s(degree-1)]
+                round_poly_evaluation_at_inf,   // s(∞)
                 alpha,
             );
         }
@@ -284,7 +295,9 @@ pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
     let d = evaluations_at_0_to_d_minus_1.len(); // This is the degree
 
     // Check if x is one of the finite evaluation points {0, ..., d-1}
-    if (x.get_val() as usize) < d {
+    if x.get_val() < d as u128 { // Compare u128 directly
+        // TODO: Check if field element conversion is always safe/correct here
+        // Assuming x.get_val() corresponds to index when x represents an integer 0..d-1
         return evaluations_at_0_to_d_minus_1[x.get_val() as usize];
     }
 
@@ -309,7 +322,7 @@ mod test {
 
     use crate::tower_fields::binius::BiniusTowerField;
     use crate::tower_fields::TowerField;
-    use crate::verifier::{barycentric_interpolation, batch_inversion_and_multiply};
+    use crate::verifier::{barycentric_interpolation, batch_inversion_and_multiply, barycentric_interpolation_with_infinity};
 
     type BF = BiniusTowerField;
 
@@ -386,5 +399,42 @@ mod test {
             barycentric_eval, original_eval,
             "Barycentric evaluation does not match original evaluation!"
         );
+    }
+
+    #[test]
+    fn test_barycentric_interpolation_with_infinity() {
+        // Define a polynomial s(x) = c_d * x^d + ... + c_1 * x + c_0
+        let degree = 5;
+        let coeffs: Vec<BF> = (0..=degree).map(|_| BF::rand(Some(3))).collect();
+        let s_inf = coeffs[degree]; // Leading coefficient is s(inf)
+
+        // Calculate evaluations at {0, 1, ..., d-1}
+        let points_0_to_d_minus_1: Vec<BF> = (0..degree).map(|j| BF::new(j as u128, None)).collect();
+        let evals_0_to_d_minus_1: Vec<BF> = points_0_to_d_minus_1.iter().map(|x| evaluate(&coeffs, x)).collect();
+
+        // Choose a random evaluation point x
+        let x_eval = BF::rand(Some(5));
+
+        // Evaluate using the interpolation function
+        let interp_eval = barycentric_interpolation_with_infinity(
+            &evals_0_to_d_minus_1,
+            s_inf,
+            x_eval,
+        );
+
+        // Evaluate directly using coefficients
+        let direct_eval = evaluate(&coeffs, &x_eval);
+
+        // Assert they match
+        assert_eq!(interp_eval, direct_eval, "Interpolation with infinity failed");
+
+        // Test edge case: evaluate at one of the known points (e.g., 2)
+        let x_known = BF::new(2, None);
+        let interp_eval_known = barycentric_interpolation_with_infinity(
+            &evals_0_to_d_minus_1,
+            s_inf,
+            x_known,
+        );
+        assert_eq!(interp_eval_known, evals_0_to_d_minus_1[2], "Interpolation with infinity failed at known point");
     }
 }

@@ -11,6 +11,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Computes the round polynomial using the algorithm 1 (collapsing arrays) from the paper
     /// https://github.com/ingonyama-zk/papers/blob/main/sumcheck_201_chapter_1.pdf
     ///
+    /// Computes evaluations for {0, ∞, 2, ..., d-1} and stores them in that order.
     /// Outputs the challenge (which is an extension field element).
     pub fn compute_round_polynomial<C, F>(
         round_number: usize,
@@ -29,23 +30,25 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             round_polynomial_degree > 0,
             "Round polynomial degree must be > 0"
         );
-
+        let d = round_polynomial_degree;
         let state_polynomial_len = state_polynomials[0].list.len();
 
-        // Compute the evaluations s_i(0), s_i(2), ..., s_i(d - 1), and s_i(∞)
+        // Compute the evaluations s_i(0), s_i(∞), s_i(2), ..., s_i(d - 1)
         // d = 1 ==> evaluation points: 0
         // d = 2 ==> evaluation points: 0 ∞
-        // d = 3 ==> evaluation points: 0 2 ∞
-        // d = 4 ==> evaluation points: 0 2 3 ∞
-        let prover_message = (0..state_polynomial_len)
+        // d = 3 ==> evaluation points: 0 ∞ 2
+        // d = 4 ==> evaluation points: 0 ∞ 2 3
+        // Output format: [s(0), s(∞), s(2), ..., s(d-1)]
+        let summed_contributions = (0..state_polynomial_len)
             .into_par_iter()
             .map(|i| {
-                let mut contributions = vec![EF::zero(); round_polynomial_degree];
-                let mut evals_at_0: Vec<F> = Vec::with_capacity(round_polynomial_degree);
-                let mut evals_at_1: Vec<F> = Vec::with_capacity(round_polynomial_degree);
-                let mut evals_at_infty: Vec<F> = Vec::with_capacity(round_polynomial_degree);
+                // Vector holds contributions in order [s(0), s(∞), s(2), ..., s(d-1)]
+                let mut contributions = vec![EF::zero(); d];
+                let mut evals_at_0: Vec<F> = Vec::with_capacity(d);
+                let mut evals_at_1: Vec<F> = Vec::with_capacity(d);
+                let mut evals_at_infty: Vec<F> = Vec::with_capacity(d);
 
-                for k in 0..round_polynomial_degree {
+                for k in 0..d {
                     let even_val = state_polynomials[k].list[i].even;
                     let odd_val = state_polynomials[k].list[i].odd;
                     evals_at_0.push(even_val);
@@ -53,40 +56,45 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     evals_at_infty.push(odd_val - even_val);
                 }
 
-                // Combine for k = 0
+                // Compute and store s(0) at index 0
                 contributions[0] = combine_function(&evals_at_0);
 
-                // Combine for k = ∞ only if d > 1
-                if round_polynomial_degree > 1 {
-                    contributions[round_polynomial_degree - 1] = combine_function(&evals_at_infty);
+                // Compute and store s(∞) at index 1 (if d > 1)
+                if d > 1 {
+                    contributions[1] = combine_function(&evals_at_infty);
                 }
 
-                // Combine for k = 2, 3, ..., d - 1
+                // Compute contributions for s(2), s(3), ..., s(d - 1)
+                // Start recurrence from s(1) to get s(2)
                 let mut current_evals = evals_at_1;
-                for u in 2..round_polynomial_degree {
-                    for k in 0..round_polynomial_degree {
-                        // `evals_at_(u) = evals_at_(u-1) + evals_at_infty`
-                        current_evals[k] += evals_at_infty[k];
+                for u_idx in 2..d { // u = 2..d-1
+                    // Update evals for point u
+                    for k in 0..d {
+                        current_evals[k] += evals_at_infty[k]; // p_k(u) = p_k(u-1) + p_k(inf)
                     }
-                    contributions[u - 1] = combine_function(&current_evals);
+                    // Store s(u) at index u_idx (since index 0 is s(0), index 1 is s(∞))
+                    contributions[u_idx] = combine_function(&current_evals);
                 }
-                contributions
+                contributions // Return contributions in order [s(0), s(∞), s(2), ..., s(d-1)]
             })
             .reduce(
-                || (vec![EF::zero(); round_polynomial_degree]), // Inlined identity
+                || vec![EF::zero(); d], // Identity
                 |mut acc, item| {
-                    for idx in 0..round_polynomial_degree - 1 {
+                    // Reduction step
+                    for idx in 0..d {
                         acc[idx] += item[idx];
                     }
                     acc
                 },
             );
 
-        round_polynomials[round_number - 1] = prover_message;
+        // summed_contributions is already in the desired order [s(0), s(∞), s(2), ..., s(d-1)]
+        round_polynomials[round_number - 1] = summed_contributions;
 
         <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,
             b"r_poly",
+            // Send evaluations in the order [s(0), s(∞), s(2), ..., s(d-1)]
             &round_polynomials[round_number - 1],
         );
 
