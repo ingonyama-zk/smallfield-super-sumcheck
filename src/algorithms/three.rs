@@ -1,9 +1,8 @@
 use merlin::Transcript;
 
 use crate::btf_transcript::TFTranscriptProtocol;
-use crate::data_structures::{
-    bit_extend, bit_extend_and_insert, LinearLagrangeList, MatrixPolynomial,
-};
+use crate::utils::bit_manipulation::{bit_extend, bit_extend_and_insert};
+use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;
