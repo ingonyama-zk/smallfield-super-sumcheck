@@ -1,8 +1,6 @@
 use crate::tower_fields::TowerField;
 use ark_std::fmt::{self, Formatter};
-use num::{One, Zero};
 use rayon::prelude::*;
-use std::ops::{Add, Mul};
 use std::vec;
 
 /// Represents a pair of values (p(0), p(1)) where p(.) is a linear univariate polynomial of the form:

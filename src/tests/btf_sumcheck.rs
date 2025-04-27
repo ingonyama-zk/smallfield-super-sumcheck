@@ -24,7 +24,7 @@ mod fq4_tests {
     static BB_COUNT: AtomicUsize = AtomicUsize::new(0);
 
     // Define a function to get the current call count
-    pub fn get_bb_count() -> usize {
+    pub fn _get_bb_count() -> usize {
         BB_COUNT.load(Ordering::SeqCst)
     }
 

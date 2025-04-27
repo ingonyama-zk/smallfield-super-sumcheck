@@ -1,5 +1,5 @@
 use crate::tower_fields::TowerField;
-use crate::data_structures::linear_lagrange::{LinearLagrangeList, LinearLagrange};
+use crate::data_structures::linear_lagrange::LinearLagrangeList;
 use ark_std::{
     fmt::{self, Formatter},
     iterable::Iterable,
@@ -853,7 +853,7 @@ impl<F: TowerField> fmt::Debug for MatrixPolynomial<F> {
 #[cfg(test)]
 mod test {
     use crate::{
-        data_structures::linear_lagrange::{LinearLagrange, LinearLagrangeList},
+        data_structures::linear_lagrange::LinearLagrangeList,
         tower_fields::{binius::BiniusTowerField, TowerField},
     };
     use itertools::izip;
