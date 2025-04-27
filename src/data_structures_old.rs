@@ -1,3 +1,4 @@
+// Copy of the old `data_structures.rs` file, now split up into multiple files
 use std::{
   ops::{Add, AddAssign, Mul, MulAssign, Sub},
   vec,

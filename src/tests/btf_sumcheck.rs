@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod fq4_tests {
 
-    use crate::error::SumcheckError;
+    use crate::utils::error::SumcheckError;
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;

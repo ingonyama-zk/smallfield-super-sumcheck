@@ -2,7 +2,7 @@ use merlin::Transcript;
 
 use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
-use crate::eq_poly::EqPoly;
+use crate::data_structures::eq_poly::EqPoly;
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
 use crate::IPForMLSumcheck;

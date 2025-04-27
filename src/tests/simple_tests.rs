@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod simple_extension_tests {
-    use crate::data_structures::LinearLagrangeList;
-    use crate::eq_poly::EqPoly;
+    use crate::data_structures::{LinearLagrangeList, eq_poly::EqPoly};
     use crate::prover::AlgorithmType;
     use crate::prover::ProverState;
     use crate::prover::SumcheckProof;

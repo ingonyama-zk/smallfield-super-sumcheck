@@ -5,8 +5,7 @@ pub mod test_helpers {
     use nalgebra::DMatrix;
 
     use crate::{
-        data_structures::LinearLagrangeList,
-        eq_poly::EqPoly,
+        data_structures::{LinearLagrangeList, eq_poly::EqPoly},
         prover::{AlgorithmType, ProverState},
         tower_fields::TowerField,
         IPForMLSumcheck,

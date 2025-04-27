@@ -93,6 +93,7 @@ pub struct ProverInputs {
     projection_mapping_indices: Vec<usize>,
     interpolation_maps_bf: Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
     interpolation_maps_ef: Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
+    scaled_determinant: BF,
 }
 
 const NUM_VARIABLES_RANGE: Range<usize> = 14..21;
@@ -121,7 +122,7 @@ pub fn sumcheck_prove_bench(
                         let (prover_state, _, eq_challenges): (ProverState<EF, BF>, BF, _) =
                             create_sumcheck_test_data(nv, degree, algorithm.clone(), num_levels);
 
-                        let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, _) =
+                        let (emaps_base, projection_mapping_indices, imaps_base, imaps_ext, scaled_det) =
                             common_setup_for_toom_cook::<BF, EF>(degree);
 
                         if eq_challenges.is_some() {
@@ -151,6 +152,7 @@ pub fn sumcheck_prove_bench(
                             projection_mapping_indices,
                             interpolation_maps_bf: imaps_base,
                             interpolation_maps_ef: imaps_ext,
+                            scaled_determinant: scaled_det,
                         }
                     }
                 },
@@ -170,6 +172,7 @@ pub fn sumcheck_prove_bench(
                         Some(&prover_input.projection_mapping_indices),
                         Some(&prover_input.interpolation_maps_bf),
                         Some(&prover_input.interpolation_maps_ef),
+                        Some(prover_input.scaled_determinant),
                     );
                 },
                 BatchSize::SmallInput,
