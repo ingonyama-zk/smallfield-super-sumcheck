@@ -32,70 +32,71 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         debug_assert!(round_polynomial_degree > 0, "polynomial degree must be > 0");
 
         let state_polynomial_len = state_polynomials[0].list.len();
+        let num_state_polynomials = state_polynomials.len();
+        debug_assert!(
+            round_polynomial_degree == num_state_polynomials + 1,
+            "Number of state polynomials + eq poly must be equal to the round polynomial degree."
+        );
 
-        // Parallel computation of contributions using map-reduce
-        let summed_contributions_and_s_inf = (0..state_polynomial_len)
+        // Compute the evaluations s_i(0), s_i(2), ..., s_i(d - 1), and s_i(∞)
+        // d = 1 ==> evaluation points: 0
+        // d = 2 ==> evaluation points: 0 ∞
+        // d = 3 ==> evaluation points: 0 2 ∞
+        // d = 4 ==> evaluation points: 0 2 3 ∞
+        let prover_message = (0..state_polynomial_len)
             .into_par_iter()
             .map(|i| {
-                // Contributions for evaluations at 1, 2, ..., round_polynomial_degree
                 let mut contributions = vec![EF::zero(); round_polynomial_degree];
-                let mut evals_at_1: Vec<F> = Vec::with_capacity(round_polynomial_degree);
-                let mut evals_at_infty: Vec<F> = Vec::with_capacity(round_polynomial_degree);
+                let mut evals_at_0: Vec<F> = Vec::with_capacity(num_state_polynomials);
+                let mut evals_at_1: Vec<F> = Vec::with_capacity(num_state_polynomials);
+                let mut evals_at_infty: Vec<F> = Vec::with_capacity(num_state_polynomials);
 
-                // Precompute evaluations for state polynomials at 1 and infinity
-                for k in 0..round_polynomial_degree {
+                // Precompute evaluations for state polynomials at 0, 1, and ∞
+                for k in 0..num_state_polynomials {
                     let even_val = state_polynomials[k].list[i].even;
                     let odd_val = state_polynomials[k].list[i].odd;
-                    evals_at_1.push(odd_val); // eval at 1
-                    evals_at_infty.push(odd_val - even_val); // eval at infinity
+                    evals_at_0.push(even_val);
+                    evals_at_1.push(odd_val);
+                    evals_at_infty.push(odd_val - even_val);
                 }
 
-                // Precompute evaluations for the eq polynomial at 1 and infinity
+                // Precompute evaluations for the eq polynomial at 0, 1 and ∞
+                let eq_eval_at_0 = eq_polynomial.list[i].even;
                 let eq_eval_at_1 = eq_polynomial.list[i].odd;
-                let eq_eval_at_infty = eq_eval_at_1 - eq_polynomial.list[i].even;
+                let eq_eval_at_infty = eq_eval_at_1 - eq_eval_at_0;
 
-                // Compute evaluation at infinity: eq(inf) * combine(state_polys(inf))
-                let evaluation_at_infinity = eq_eval_at_infty * combine_function(&evals_at_infty);
+                // Combine for k = 0: eq(0) * combine(state_polys(0))
+                contributions[0] = eq_eval_at_0 * combine_function(&evals_at_0);
 
-                // Compute contribution from evaluation at 1: eq(1) * combine(state_polys(1))
-                contributions[0] = eq_eval_at_1 * combine_function(&evals_at_1);
+                // Combine for k = ∞ only if d > 1: eq(∞) * combine(state_polys(∞))
+                if round_polynomial_degree > 1 {
+                    contributions[round_polynomial_degree - 1] =
+                        eq_eval_at_infty * combine_function(&evals_at_infty);
+                }
 
-                // Re-use evals_at_1 vector for current evals and track eq_eval_at_u
+                // Combine for k = 2, 3, ..., d - 1: eq(u) * combine(state_polys(u))
                 let mut current_evals = evals_at_1;
                 let mut current_eq_eval = eq_eval_at_1;
-
-                // Compute contributions for u = 2 to round_polynomial_degree
-                for u_idx in 1..=round_polynomial_degree {
-                    // Update state polynomial evaluations for point u = u_idx + 1
-                    for k in 0..round_polynomial_degree {
+                for u in 2..round_polynomial_degree {
+                    for k in 0..num_state_polynomials {
+                        // `evals_at_(u) = evals_at_(u-1) + evals_at_infty`
                         current_evals[k] += evals_at_infty[k];
                     }
-                    // Update eq polynomial evaluation for point u = u_idx + 1
                     current_eq_eval += eq_eval_at_infty;
 
-                    contributions[u_idx] = current_eq_eval * combine_function(&current_evals);
+                    contributions[u - 1] = current_eq_eval * combine_function(&current_evals);
                 }
-                (contributions, evaluation_at_infinity) // Return contributions and eval at infinity
+                contributions
             })
             .reduce(
-                || (vec![EF::zero(); round_polynomial_degree], EF::zero()), // Identity: zero vector and zero scalar
+                || (vec![EF::zero(); round_polynomial_degree]), // Inlined identity
                 |mut acc, item| {
-                    // Reduction step: Sum contributions vector and infinity evaluation
                     for idx in 0..round_polynomial_degree {
-                        acc.0[idx] += item.0[idx];
+                        acc[idx] += item[idx];
                     }
-                    acc.1 += item.1;
                     acc
                 },
             );
-
-        let (summed_contributions, summed_s_inf) = summed_contributions_and_s_inf;
-
-        // Construct the prover message (round polynomial coefficients)
-        // Order: [eval_at_inf, eval_at_1, eval_at_2, ..., eval_at_{round_polynomial_degree}]
-        let mut prover_message = Vec::with_capacity(round_polynomial_degree + 1);
-        prover_message.push(summed_s_inf);
-        prover_message.extend_from_slice(&summed_contributions);
 
         round_polynomials[round_number - 1] = prover_message;
 
@@ -141,7 +142,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut eq_state_poly = LinearLagrangeList::from_vector(&eq_evals);
 
         // The degree of the round polynomial is the number of polynomials being multiplied.
-        let r_degree = prover_state.state_polynomials.len();
+        // Plus one for the eq polynomial.
+        let r_degree = prover_state.state_polynomials.len() + 1;
 
         // For all rounds, all of the data will be extension field elements as we're multiplying base
         // field polynomials with the extension field eq polynomial. So we copy all of the prover state polynomials
