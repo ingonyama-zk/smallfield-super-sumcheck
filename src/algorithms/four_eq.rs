@@ -6,7 +6,7 @@ use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
 use crate::eq_poly::EqPoly;
 use crate::prover::ProverState;
 use crate::tower_fields::TowerField;
-use crate::verifier::barycentric_interpolation;
+use crate::verifier::barycentric_interpolation_with_infinity;
 use crate::IPForMLSumcheck;
 
 impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
@@ -24,6 +24,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         interpolation_maps_bf: &Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
         interpolation_maps_ef: &Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
         ef_combine_function: &EC,
+        scaled_determinant: &BF,
+        claimed_sum: EF,
     ) where
         BE: Fn(&BF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
@@ -336,6 +338,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // We will compute the equality terms first and then compute the inner sum for each k.
         //
         let mut eq_1_left_cumulative = EF::one();
+        let mut current_sum = claimed_sum;
         for round_num in 1..=round_small_val {
             // Constants
             let round_size = num_evals.pow(round_num as u32);
@@ -364,59 +367,89 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             assert_eq!(precomputed_array_for_this_round.len(), round_size);
             assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
 
-            let mut intermediate_round_poly: Vec<EF> = Vec::with_capacity(num_evals as usize);
-            for k in 0..num_evals as u64 {
+            // Compute the intermediate round polynomial
+            //
+            // d = 1 ==> evaluation points: 0
+            // d = 2 ==> evaluation points: 0 ∞
+            // d = 3 ==> evaluation points: 0 2 ∞
+            // d = 4 ==> evaluation points: 0 2 3 ∞
+            //
+            // Decompose j as (j_p, j_{p-1}, ...., j_2, j_1)
+            // j_1 is used to compute L_{j_1}(k) so we treat it separately
+            // Rest of the indices are used to fetch respective challenge terms
+            // Thus, we iterate over only (j_2, j_3, ..., j_p) in round p.
+            // This results in a total of (d + 1)ᵖ⁻¹ be multiplications in round p.
+            //
+            let mut precomputed_array_and_challege_values = vec![EF::zero(); num_witness_polys];
+            let mut eq_1_center_evaluations = vec![EF::zero(); num_witness_polys];
+            let mut intermediate_round_poly: Vec<EF> = Vec::with_capacity(num_witness_polys);
+            let eq_challenge_value = eq_challenges[round_num - 1];
+            for j in 0..(round_size / num_evals) {
+                // Fetch the following term using j from the already-computed array
+                // that contains multiplications of challenge terms.
                 //
-                // Lets start with the outer equality polynomial terms:
-                // +------------+----------------------------+------------------------+
-                // |            | Eq challenges              | Round challenges       |
-                // +------------+----------------------------+------------------------+
-                // | eq1 left   | α_1, α_2, ..., α_{i-1} ]   | r_1, r_2, ..., r_{i-1} |
-                // | eq1 center | α_i                        | r_i                    |
-                // +------------+----------------------------+------------------------+
+                // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
                 //
-                // We have the eq1 left evaluation in the eq1_left_cumulative variable
-                // Lets compute the eq1 centre evaluation (denoted by (B) in the equation above)
-                // (1 - k)(1 - e) + ke = 2ke - k - e + 1
-                let k_val = BF::new(k as u128, Some(3));
-                let eq_challenge_value = eq_challenges[round_num - 1];
-                let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
-                let eq_1_center_evaluation = k_times_eq_challenge_value
-                    + k_times_eq_challenge_value
-                    - EF::new(k as u128, None)
-                    - eq_challenge_value
-                    + EF::one();
+                // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
+                //
+                let local_interpolated_challenge =
+                    interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
 
                 //
-                // Compute the witness-challenge multiplication term for this round
-                // Note this is denoted by (C) in the equation above
+                // Process k = 0 in two steps:
+                // 1. Compute the witness-challenge multiplication term for this round
+                // 2. Compute the eq1 center evaluation for k = 0: (1 - k)(1 - e) + ke = 1 - e
                 //
-                let mut scalar_matrix: MatrixPolynomial<BF> = MatrixPolynomial::<BF> {
-                    no_of_rows: 0,
-                    no_of_columns: num_evals,
-                    evaluation_rows: Vec::with_capacity(1),
-                };
-                let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
-
-                // We make a minor assumption here. We assume that k is a 4-bit number, i.e. k ∈ {0, 1, ..., 15}
-                // since it's reasonable to assume num_evals would be always less than 16.
-                // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
-                // and we want these terms to be as "small" as possible.
-                scalar_matrix.update_with_challenge(
-                    BF::new(k as u128, Some(2)),
-                    &interpolation_maps_bf,
-                    &mult_bb_local,
+                let local_witness_accumulator_zero = mult_be(
+                    scaled_determinant,
+                    &precomputed_array_for_this_round[j * num_evals],
                 );
+                precomputed_array_and_challege_values[0] += mult_ee(
+                    &local_witness_accumulator_zero,
+                    &local_interpolated_challenge,
+                );
+                eq_1_center_evaluations[0] = EF::one() - eq_challenge_value;
 
-                //
-                // Decompose j as (j_p, j_{p-1}, ...., j_2, j_1)
-                // j_1 is used to compute L_{j_1}(k) so we treat it separately
-                // Rest of the indices are used to fetch respective challenge terms
-                // Thus, we iterate over only (j_2, j_3, ..., j_p) in round p.
-                // This results in a total of (d + 1)ᵖ⁻¹ be multiplications in round p.
-                //
-                let mut precomputed_array_and_challege_value = EF::zero();
-                for j in 0..(round_size / num_evals) {
+                if num_witness_polys > 1 {
+                    //
+                    // Process k = ∞ only if d > 1
+                    // 1. Compute the witness-challenge multiplication term for this round
+                    // 2. Compute the eq1 center evaluation for k = ∞: (1 - k)(1 - e) + ke = 2ke - k - e + 1 = 2e - 1
+                    //
+                    let local_witness_accumulator_infty = interpolation_maps_ef.last().unwrap()(
+                        &precomputed_array_for_this_round[j * num_evals..(j + 1) * num_evals]
+                            .to_vec(),
+                    );
+                    precomputed_array_and_challege_values[num_witness_polys - 1] += mult_ee(
+                        &local_witness_accumulator_infty,
+                        &local_interpolated_challenge,
+                    );
+                    eq_1_center_evaluations[num_witness_polys - 1] =
+                        eq_challenge_value + eq_challenge_value - EF::one();
+                }
+
+                // Process k = 2, 3, ..., d - 1 (total d - 2 evaluations)
+                for k in 2..num_witness_polys {
+                    // Compute the witness-challenge multiplication term for this round
+                    // Note this is denoted by (C) in the equation above
+                    //
+                    let mut scalar_matrix: MatrixPolynomial<BF> = MatrixPolynomial::<BF> {
+                        no_of_rows: 0,
+                        no_of_columns: num_evals,
+                        evaluation_rows: Vec::with_capacity(1),
+                    };
+                    let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
+
+                    // We make a minor assumption here. We assume that k is a 4-bit number, i.e. k ∈ {0, 1, ..., 15}
+                    // since it's reasonable to assume num_evals would be always less than 16.
+                    // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
+                    // and we want these terms to be as "small" as possible.
+                    scalar_matrix.update_with_challenge(
+                        BF::new(k as u128, Some(2)),
+                        &interpolation_maps_bf,
+                        &mult_bb_local,
+                    );
+
                     // Extract j_1 to process the scalar separately
                     let mut local_witness_accumulator = EF::zero();
                     for j_1 in 0..num_evals {
@@ -426,71 +459,115 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                         );
                     }
 
-                    // Fetch the following term using j from the already-computed array
-                    // that contains multiplications of challenge terms.
-                    //
-                    // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
-                    //
-                    // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
-                    //
-                    let local_interpolated_challenge =
-                        interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
-
-                    // Update the precomputed_array_and_challege_value term
-                    precomputed_array_and_challege_value +=
+                    // Update the precomputed_array_and_challege_value term for k
+                    precomputed_array_and_challege_values[k as usize - 1] +=
                         mult_ee(&local_witness_accumulator, &local_interpolated_challenge);
 
-                    // Accumulate round polynomial evaluation at k
-                    round_polynomials[round_num - 1][k as usize] +=
-                        mult_ee(&local_witness_accumulator, &local_interpolated_challenge);
+                    // For k = 2, 3, ..., d - 1, eq1 center evaluation is:
+                    // (1 - k)(1 - e) + ke = 2ke - k - e + 1
+                    let k_val = BF::new(k as u128, Some(3));
+                    let eq_challenge_value = eq_challenges[round_num - 1];
+                    let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
+                    let eq_1_center_evaluation = k_times_eq_challenge_value
+                        + k_times_eq_challenge_value
+                        - EF::new(k as u128, None)
+                        - eq_challenge_value
+                        + EF::one();
+                    eq_1_center_evaluations[k as usize - 1] = eq_1_center_evaluation;
                 }
+            }
 
+            // Now we have the precomputed array and challenge values for this round
+            // We need to compute the round polynomial evaluations for this round
+            // The round polynomial is of the form:
+            // s_i(k) = eq1_left * eq1_center * pc(...)
+            // for k = 0, 2, ..., d - 1, ∞.
+            for (k, (eq_1_centre_eval, pc_witness_challenge_term)) in
+                precomputed_array_and_challege_values
+                    .iter()
+                    .zip(eq_1_center_evaluations.iter())
+                    .enumerate()
+            {
                 // The round polynomial value is simply the product of the:
                 // eq1 left value, eq 1 centre value and the precomputed array value
                 let intermediate_round_poly_evaluation =
-                    mult_ee(&eq_1_left_cumulative, &precomputed_array_and_challege_value);
+                    mult_ee(&eq_1_left_cumulative, &pc_witness_challenge_term);
 
                 round_polynomials[round_num - 1][k as usize] =
-                    mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
+                    mult_ee(&eq_1_centre_eval, &intermediate_round_poly_evaluation);
 
                 intermediate_round_poly.push(intermediate_round_poly_evaluation);
             }
 
-            // Now we need to compute the final evaluation of the round polynomial at k = (d + 1)
-            // To do that, we need to interpolate the intermediate round polynomial and compute
-            // its evaluation at k = (d + 1)
-            // Then we can simply compute the final round polynomial evaluation as
-            // eq1(w_i, k) * s'_i(d + 1)
+            // Now we have a slightly tricky situation. We can derive the evaluation of the round polynomial
+            // at k = 1 from the claimed sum, but we need to find the evaluation of the intermediate round polynomial
+            // at k = 1. We can see that for k = 1:
+            // s_i(1) = w_i * irp_i(1)
+            // where w_i is i-th eq challenge and irp_i(k) is the intermediate round polynomial
+            // because eq_1_centre = (1 - k)(1 - e) + ke = e when k = 1.
+            // So we can compute the evaluation of the intermediate round polynomial at k = 1 by
+            // irp_i(1) = s_i(1) / w_i
+            // and then we can interpolate the intermediate round polynomial to get its evaluation at k = d.
             //
-            let intermediate_round_poly_final_eval = barycentric_interpolation(
+            // Note: see verifier for why we multiply the current sum with the scaled determinant.
+            let modified_current_sum = mult_be(scaled_determinant, &current_sum);
+            let derived_round_poly_evaluation_at_1 =
+                modified_current_sum - round_polynomials[round_num - 1][0];
+            // TODO: send eq i inverses as input to prover
+            let derived_intermediate_round_poly_evaluation_at_1 =
+                derived_round_poly_evaluation_at_1 * eq_challenge_value.inverse().unwrap();
+            intermediate_round_poly.insert(1, derived_intermediate_round_poly_evaluation_at_1);
+            let intermediate_round_poly_evaluation_at_infty =
+                intermediate_round_poly.pop().unwrap();
+
+            // Interpolate the intermediate round polynomial to get its evaluation at k = d
+            let intermediate_round_poly_final_eval = barycentric_interpolation_with_infinity(
                 &intermediate_round_poly,
-                EF::new(num_evals as u128, Some(2)),
+                intermediate_round_poly_evaluation_at_infty,
+                EF::new(num_witness_polys as u128, Some(2)),
             );
 
-            // Compute the eq1 centre evaluation at k = (d + 1)
-            let final_k_val = BF::new(num_evals as u128, Some(2));
-            let one_minus_final_k_val = BF::one() - final_k_val;
-            let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
-            let eq_challenge_value = eq_challenges[round_num - 1];
-            let eq_1_center_evaluation =
-                mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
-                    + mult_be(&final_k_val, &eq_challenge_value);
+            // Compute the eq1 centre evaluation at k = d: (1 - k)(1 - e) + ke
+            let final_k_val = BF::new(num_witness_polys as u128, Some(2));
+            let k_times_eq_challenge_value = mult_be(&final_k_val, &eq_challenge_value);
+            let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
+                - EF::new(num_witness_polys as u128, None)
+                - eq_challenge_value
+                + EF::one();
 
+            // Compute and insert the final round polynomial evaluation
+            // Round polynomial will be of the form: s(0) s(2) ... s(d - 1) s(d) s(∞)
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
-            round_polynomials[round_num - 1][num_evals] = final_round_poly_eval;
+            round_polynomials[round_num - 1].insert(num_witness_polys - 1, final_round_poly_eval);
+            assert_eq!(
+                round_polynomials[round_num - 1].len(),
+                num_witness_polys + 1
+            );
+
+            // Update the current sum for the next round
+            let mut current_round_poly_evals = round_polynomials[round_num - 1].clone();
+            current_round_poly_evals.insert(1, derived_round_poly_evaluation_at_1);
+            let current_round_poly_at_infty = current_round_poly_evals.pop().unwrap();
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
-                &round_polynomials[round_num - 1],
+                &round_polynomials[round_num - 1], // (d + 1) evaluations
             );
 
             // generate challenge α_i = H( transcript );
             let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
+            );
+
+            // Compute r_{i}(α_i) using the interpolation formula with infinity
+            current_sum = barycentric_interpolation_with_infinity(
+                &current_round_poly_evals,   // s(0), s(1), ..., s(d)
+                current_round_poly_at_infty, // s(inf)
+                alpha,                       // α_i
             );
 
             // Store the challenge in the challenge vector
@@ -552,13 +629,19 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             let state_poly_size = ef_state_polynomials[0].list.len();
             assert_eq!(state_poly_size, 1 << (prover_state.num_vars - round_num));
 
+            let eq_challenge_value = eq_challenges[round_num - 1];
             let mut intermediate_round_poly: Vec<EF> = Vec::with_capacity(num_evals as usize);
 
-            for k in 0..num_evals {
+            // Compute the evals for k = 0, 2, ..., d - 1, ∞
+            for k in 0..=num_witness_polys {
+                // Skip the evaluation for k = 1
+                if k == 1 {
+                    continue;
+                }
+
                 // Compute the eq1 centre evaluation
                 // (1 - k)(1 - e) + ke = 2ke - k - e + 1
                 let k_val = BF::new(k as u128, Some(3));
-                let eq_challenge_value = eq_challenges[round_num - 1];
                 let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
                 let eq_1_center_evaluation = k_times_eq_challenge_value
                     + k_times_eq_challenge_value
@@ -568,19 +651,42 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
                 // Evaluation points
                 let k_val = EF::new(k as u128, None);
-                let one_minus_k_val = EF::one() - k_val;
 
                 // Compute the witness products
+                // TODO: check if we can avoid mult by k
                 let mut witness_products = vec![EF::one(); state_poly_size];
-                for poly in &ef_state_polynomials {
-                    for (i, witness) in poly.list.iter().enumerate() {
-                        witness_products[i] = mult_ee(
-                            &witness_products[i],
-                            &(one_minus_k_val * witness.even + k_val * witness.odd),
-                        );
+
+                if k == 0 {
+                    // For k = 0, we need to compute the witness products
+                    // using the witness polynomials
+                    for poly in &ef_state_polynomials {
+                        for (i, witness) in poly.list.iter().enumerate() {
+                            witness_products[i] = mult_ee(&witness_products[i], &witness.even);
+                        }
+                    }
+                } else if k == num_witness_polys {
+                    // For k = ∞, we need to compute the witness products
+                    // using the witness polynomials
+                    for poly in &ef_state_polynomials {
+                        for (i, witness) in poly.list.iter().enumerate() {
+                            witness_products[i] =
+                                mult_ee(&witness_products[i], &(witness.even - witness.odd));
+                        }
+                    }
+                } else {
+                    // For k = 2, 3, ..., d - 1, we need to compute the witness products
+                    // using the witness polynomials
+                    for poly in &ef_state_polynomials {
+                        for (i, witness) in poly.list.iter().enumerate() {
+                            witness_products[i] = mult_ee(
+                                &witness_products[i],
+                                &(witness.even + k_val * (witness.odd - witness.even)),
+                            );
+                        }
                     }
                 }
 
+                // TODO: move this eq poly and witness poly computation to a standalone function
                 // Now merge the witness products with the eq1 right and eq2 evaluations
                 // Fetch the equality polynomials for this round
                 let eq_1_right_for_round = &eq_1_right_staged_evals[round_num - 1];
@@ -609,6 +715,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                         mult_ee(witness_and_eq2_term, eq_1_right_term)
                     })
                     .fold(EF::zero(), |acc, val| acc + val);
+                // TODO: move this eq poly and witness poly computation to a standalone function
 
                 // Push the intermediate round polynomial evaluation
                 let intermediate_round_poly_evaluation =
@@ -616,33 +723,61 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 intermediate_round_poly.push(intermediate_round_poly_evaluation);
 
                 // Compute the round polynomial evaluation
-                round_polynomials[round_num - 1][k as usize] =
+                let round_poly_idx = if k == 0 { 0 } else { k - 1 };
+                round_polynomials[round_num - 1][round_poly_idx] =
                     mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
             }
 
-            // Now we need to compute the final evaluation of the round polynomial at k = (d + 1)
-            // To do that, we need to interpolate the intermediate round polynomial and compute
-            // its evaluation at k = (d + 1)
-            // Then we can simply compute the final round polynomial evaluation as
-            // eq1(w_i, k) * s'_i(d + 1)
+            // Now we have a slightly tricky situation. We can derive the evaluation of the round polynomial
+            // at k = 1 from the claimed sum, but we need to find the evaluation of the intermediate round polynomial
+            // at k = 1. We can see that for k = 1:
+            // s_i(1) = w_i * irp_i(1)
+            // where w_i is i-th eq challenge and irp_i(k) is the intermediate round polynomial
+            // because eq_1_centre = (1 - k)(1 - e) + ke = e when k = 1.
+            // So we can compute the evaluation of the intermediate round polynomial at k = 1 by
+            // irp_i(1) = s_i(1) / w_i
+            // and then we can interpolate the intermediate round polynomial to get its evaluation at k = d.
             //
-            let intermediate_round_poly_final_eval = barycentric_interpolation(
+            // Note: see verifier for why we multiply the current sum with the scaled determinant.
+            let modified_current_sum = mult_be(scaled_determinant, &current_sum);
+            let derived_round_poly_evaluation_at_1 =
+                modified_current_sum - round_polynomials[round_num - 1][0];
+            // TODO: send eq i inverses as input to prover
+            let derived_intermediate_round_poly_evaluation_at_1 =
+                derived_round_poly_evaluation_at_1 * eq_challenge_value.inverse().unwrap();
+            intermediate_round_poly.insert(1, derived_intermediate_round_poly_evaluation_at_1);
+            let intermediate_round_poly_evaluation_at_infty =
+                intermediate_round_poly.pop().unwrap();
+
+            // Interpolate the intermediate round polynomial to get its evaluation at k = d
+            let intermediate_round_poly_final_eval = barycentric_interpolation_with_infinity(
                 &intermediate_round_poly,
-                EF::new(num_evals as u128, Some(2)),
+                intermediate_round_poly_evaluation_at_infty,
+                EF::new(num_witness_polys as u128, Some(2)),
             );
 
-            // Compute the eq1 centre evaluation at k = (d + 1)
-            let final_k_val = BF::new(num_evals as u128, Some(2));
-            let one_minus_final_k_val = BF::one() - final_k_val;
-            let one_minus_eq_challenge_value = EF::one() - eq_challenges[round_num - 1];
-            let eq_challenge_value = eq_challenges[round_num - 1];
-            let eq_1_center_evaluation =
-                mult_be(&one_minus_final_k_val, &one_minus_eq_challenge_value)
-                    + mult_be(&final_k_val, &eq_challenge_value);
+            // Compute the eq1 centre evaluation at k = d: (1 - k)(1 - e) + ke
+            let final_k_val = BF::new(num_witness_polys as u128, Some(2));
+            let k_times_eq_challenge_value = mult_be(&final_k_val, &eq_challenge_value);
+            let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
+                - EF::new(num_witness_polys as u128, None)
+                - eq_challenge_value
+                + EF::one();
 
+            // Compute and insert the final round polynomial evaluation
+            // Round polynomial will be of the form: s(0) s(2) ... s(d - 1) s(d) s(∞)
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
-            round_polynomials[round_num - 1][num_evals] = final_round_poly_eval;
+            round_polynomials[round_num - 1].insert(num_witness_polys - 1, final_round_poly_eval);
+            assert_eq!(
+                round_polynomials[round_num - 1].len(),
+                num_witness_polys + 1
+            );
+
+            // Update the current sum for the next round
+            let mut current_round_poly_evals = round_polynomials[round_num - 1].clone();
+            current_round_poly_evals.insert(1, derived_round_poly_evaluation_at_1);
+            let current_round_poly_at_infty = current_round_poly_evals.pop().unwrap();
 
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
@@ -655,6 +790,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
+            );
+
+            // Compute r_{i}(α_i) using the interpolation formula with infinity
+            current_sum = barycentric_interpolation_with_infinity(
+                &current_round_poly_evals,   // s(0), s(1), ..., s(d)
+                current_round_poly_at_infty, // s(inf)
+                alpha,                       // α_i
             );
 
             // Store the challenge in the challenge vector
@@ -699,7 +841,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 round_num,
                 &ef_state_polynomials,
                 round_polynomials,
-                num_witness_polys,
+                num_witness_polys + 1, // TODO: fix this
                 &ef_combine_function,
                 transcript,
             );

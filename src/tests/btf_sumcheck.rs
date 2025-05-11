@@ -143,6 +143,7 @@ mod fq4_tests {
             Some(&imaps_base),
             Some(&imaps_ext),
             Some(scaled_det),
+            Some(claimed_sum),
         );
         let elapsed = start.elapsed();
         println!("prove_time: {:.2?}", elapsed);
