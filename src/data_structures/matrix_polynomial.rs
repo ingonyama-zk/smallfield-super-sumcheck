@@ -11,23 +11,39 @@ use rayon::prelude::*;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub};
 use std::vec;
 
+/// Represents evaluations of a multilinear polynomial (or multiple polynomials)
+/// structured in a matrix form suitable for sum-check algorithms, particularly Algorithm 2.
 ///
-/// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix form.
+/// The core idea is to store evaluations in a 2D `Vec<Vec<F>>` (`evaluation_rows`)
+/// where the arrangement facilitates folding variables one by one during sum-check rounds.
+/// Initially, for a polynomial $p(X_1, \dots, X_\ell)$, it's often represented as a
+/// `2 x 2^{\ell-1}` matrix, where `evaluation_rows[0]` holds evaluations of $p(0, X_2, \dots, X_\ell)$
+/// and `evaluation_rows[1]` holds evaluations of $p(1, X_2, \dots, X_\ell)$.
 ///
+/// The `heighten` operation reshapes the matrix (doubling rows, halving columns)
+/// effectively folding in the next variable.
+/// `no_of_rows * no_of_columns` remains constant and equals $2^{\ell - i}$ after round `i`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct MatrixPolynomial<F: TowerField> {
+    /// Number of rows, typically $2^i$ after round `i`.
     pub no_of_rows: usize,
+    /// Number of columns, typically $2^{\ell-i}$ after round `i`.
     pub no_of_columns: usize,
+    /// The actual evaluations stored row by row.
     pub evaluation_rows: Vec<Vec<F>>,
 }
 
+/// A generic version of `MatrixPolynomial` using a generic type `T` instead of `TowerField`.
 ///
-/// For sumcheck prover (algorithm 2), we need to represent polynomial evaluations in a matrix (integer) form.
-///
+/// Often used for intermediate calculations or testing with simpler types like integers.
+/// The structure and operations mirror `MatrixPolynomial<F>`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MatrixPolynomialInt<T> {
+    /// Number of rows.
     pub no_of_rows: usize,
+    /// Number of columns.
     pub no_of_columns: usize,
+    /// The actual evaluations stored row by row.
     pub evaluation_rows: Vec<Vec<T>>,
 }
 
@@ -45,6 +61,8 @@ where
         + Send
         + Sync,
 {
+    /// Creates a `2 x N/2` matrix from a flat vector of `N` evaluations,
+    /// splitting the input vector in half.
     pub fn from_evaluations(input_polynomial: &Vec<T>) -> Self {
         let n = input_polynomial.len();
         let mid_point = n / 2;
@@ -57,6 +75,7 @@ where
         }
     }
 
+    /// Retrieves a specific column from the matrix as a `Vec<T>`.
     pub fn get_column(&self, column_index: usize) -> Vec<T> {
         let mut column = Vec::with_capacity(self.no_of_rows);
         for i in 0..self.no_of_rows {
@@ -65,6 +84,18 @@ where
         column
     }
 
+    /// Reshapes the matrix for the next sum-check round by folding in one variable.
+    ///
+    /// Doubles the number of rows (`no_of_rows *= 2`)
+    /// Halves the number of columns (`no_of_columns /= 2`).
+    /// Takes the right half of each original row `i` and makes it the new row `2*i + 1`.
+    /// Truncates the original row `i` (now new row `2*i`) to its left half.
+    ///
+    /// Example: `2x4 -> 4x2`
+    /// Row 0: `[a, b, c, d]` -> `[a, b]` (new Row 0)
+    ///                        `[c, d]` (new Row 1)
+    /// Row 1: `[e, f, g, h]` -> `[e, f]` (new Row 2)
+    ///                        `[g, h]` (new Row 3)
     pub fn heighten(&mut self) {
         // Update the dimensions of the original matrix
         self.no_of_rows *= 2;
@@ -80,6 +111,20 @@ where
         }
     }
 
+    /// Computes the tensor product of multiple matrices and sums the columns.
+    ///
+    /// Given `d` matrices $M_1, ..., M_d$, each of size `rows x cols`,
+    /// this computes the tensor product $T = M_1 \otimes ... \otimes M_d$, which has dimensions
+    /// `rows^d x cols^d` (conceptually).
+    ///
+    /// It then computes a result vector `output` of length `rows^d` where `output[i]` is the sum
+    /// of elements in the i-th "row slice" of the conceptual tensor product, interpreted
+    /// differently. Specifically, `output[i]` corresponds to selecting row `i_k` from matrix `M_k`
+    /// (where `i` encodes the tuple `(i_1, ..., i_d)`), taking the Hadamard product of these rows,
+    /// and summing the result.
+    ///
+    /// `output[idx] = sum_{j=0}^{cols-1} M_1[i_1][j] * M_2[i_2][j] * ... * M_d[i_d][j]`
+    /// where `idx` encodes `(i_1, ..., i_d)`.
     pub fn tensor_inner_product(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<T>
     where
         T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
@@ -103,25 +148,31 @@ where
             .into_par_iter()
             .map(|i| {
                 // Compute the tensor product for each `i` in parallel
-                let mut local_output = vec![T::one(); col_count];
-                for j in 0..d {
-                    let offset = (d - j - 1) * log_row_count;
-                    let index = (i >> offset) & (row_count - 1);
-                    let matrix_row = &matrices[j].evaluation_rows[index];
+                let mut hadamard_product_row = vec![T::one(); col_count];
+                for k in 0..d { // Corrected loop variable from j to k for clarity
+                    let offset = (d - k - 1) * log_row_count;
+                    let index = (i >> offset) & (row_count - 1); // Row index for matrix k
+                    let matrix_row = &matrices[k].evaluation_rows[index];
 
-                    local_output
+                    // Accumulate Hadamard product
+                    hadamard_product_row
                         .par_iter_mut()
                         .zip(matrix_row.par_iter())
-                        .for_each(|(m_acc, m_curr)| *m_acc *= *m_curr);
+                        .for_each(|(acc, val)| *acc *= *val);
                 }
 
-                // Sum up the local output
-                local_output.iter().copied().sum()
+                // Sum up the resulting Hadamard product row
+                hadamard_product_row.iter().copied().sum()
             })
             .collect()
     }
 
-    // We want to compute tensor product of the columns of the matrices and store them in a vector.
+    /// Computes the tensor product of corresponding columns across multiple matrices.
+    ///
+    /// Given `d` matrices $M_1, ..., M_d$, each `rows x cols`,
+    /// returns a `Vec<Vec<T>>` of size `cols`, where each inner vector `output[j]` has size `rows^d`.
+    /// `output[j]` is the tensor product of the j-th columns of all input matrices:
+    /// `output[j] = M_1[*, j] \otimes M_2[*, j] \otimes ... \otimes M_d[*, j]`
     pub fn tensor_column_products(matrices: &Vec<MatrixPolynomialInt<T>>) -> Vec<Vec<T>>
     where
         T: Send + Sync + std::ops::MulAssign + Copy + std::iter::Sum + 'static,
@@ -144,14 +195,14 @@ where
                 let columns: Vec<Vec<T>> =
                     matrices.iter().map(|matrix| matrix.get_column(i)).collect();
 
-                // Compute the tensor product of the columns
+                // Compute the tensor product of these columns
                 columns
                     .into_iter()
-                    .multi_cartesian_product()
+                    .multi_cartesian_product() // Generates combinations like (col1[row_i], col2[row_j], ...)
                     .map(|comb| {
                         // Multiply all the elements in the combination
-                        comb.iter().fold(T::one(), |mut acc, c_value| {
-                            acc *= *c_value;
+                        comb.iter().fold(T::one(), |mut acc, &c_value| {
+                            acc *= c_value;
                             acc
                         })
                     })
@@ -160,6 +211,14 @@ where
             .collect::<Vec<Vec<T>>>()
     }
 
+    /// Computes Merkle roots for each column, treating rows as leaves.
+    ///
+    /// For each column `x`, it takes the values `(p(b, x))_{b \in {0,1}^p}`
+    /// (where `p = log2(no_of_rows)`) and computes a Merkle root using the provided `mappings`.
+    /// The `index_j` determines which mapping function from `mappings` is used at each level
+    /// of the Merkle tree computation.
+    ///
+    /// Returns a `1 x no_of_columns` matrix containing the Merkle roots for each column.
     pub fn compute_merkle_roots(
         input_polynomial: &MatrixPolynomialInt<T>,
         index_j: usize,
@@ -191,7 +250,9 @@ where
                     .map(|row| row[x].clone()) // Use clone if T doesn't implement Copy
                     .collect();
 
+                // Compute the Merkle tree from bottom up
                 for layer in 1..=depth {
+                    // Determine which mapping function to use for this layer based on index_j
                     let j_layer = (index_j / num_maps.pow((layer - 1) as u32)) % num_maps;
                     let mapping_for_this_layer = &mappings[j_layer];
 
@@ -209,6 +270,7 @@ where
         output
     }
 
+    /// Computes the Hadamard product (element-wise multiplication) of two matrices.
     pub fn hadamard_product(&self, rhs: &MatrixPolynomialInt<T>) -> MatrixPolynomialInt<T> {
         assert_eq!(self.no_of_columns, rhs.no_of_columns);
         assert_eq!(self.no_of_rows, rhs.no_of_rows);
@@ -232,6 +294,11 @@ where
         output
     }
 
+    /// Computes sums up a Merkle tree structure based on selected children.
+    ///
+    /// Given a flat `input` vector representing the leaves of a tree with `num_children` per node,
+    /// it computes the sum of specific children at each level, defined by `indices_to_combine`.
+    /// Returns a `Vec<Vec<T>>` where `output[0]` is the root sum, `output[1]` is the next level, ..., `output[depth]` is the original input.
     pub fn merkle_sums(
         input: &Vec<T>,
         num_children: usize,
@@ -240,7 +307,7 @@ where
         let input_size = input.len();
         let depth: usize = input_size.ilog(num_children) as usize;
         assert!(indices_to_combine.len() <= num_children);
-        assert_eq!(input_size, num_children.pow(depth as u32));
+        assert_eq!(input_size, num_children.pow(depth as u32), "Input size must match tree structure");
 
         // Reserve space for the output in advance
         let mut output: Vec<Vec<T>> = Vec::with_capacity(depth + 1);
@@ -269,7 +336,7 @@ where
             layer = next_layer; // Move to the next layer
             layer_size /= num_children; // Update the layer size
         }
-        output.reverse();
+        output.reverse(); // Put root at index 0, leaves at index `depth`
         output
     }
 }
@@ -278,6 +345,7 @@ impl<F: TowerField> MatrixPolynomial<F>
 where
     F: Send + Sync,
 {
+    /// Creates a 1x1 matrix containing the field's multiplicative identity.
     pub fn one() -> Self {
         MatrixPolynomial {
             no_of_rows: 1,
@@ -286,6 +354,7 @@ where
         }
     }
 
+    /// Creates a matrix of specified dimensions filled with the field's multiplicative identity.
     pub fn ones(given_no_of_rows: usize, given_no_of_columns: usize) -> Self {
         MatrixPolynomial {
             no_of_rows: given_no_of_rows,
@@ -294,12 +363,10 @@ where
         }
     }
 
+    /// Creates an `N x 1` matrix (column vector) from a flat `Vec<F>`.
     pub fn from_evaluations_vec(input_vec: &Vec<F>) -> Self {
         let n = input_vec.len();
-        let mut eval_rows = Vec::with_capacity(n);
-        for i in 0..n {
-            eval_rows.push(vec![input_vec[i]]);
-        }
+        let eval_rows: Vec<Vec<F>> = input_vec.iter().map(|&val| vec![val]).collect();
 
         MatrixPolynomial {
             no_of_rows: n,
@@ -308,6 +375,10 @@ where
         }
     }
 
+    /// Creates a `2 x N/2` matrix from a `LinearLagrangeList`.
+    ///
+    /// Row 0 contains the `even` components, Row 1 contains the `odd` components.
+    /// This represents evaluations $p(0, x')$ and $p(1, x')$.
     pub fn from_linear_lagrange_list(input_polynomial: &LinearLagrangeList<F>) -> Self {
         let n_by_2 = input_polynomial.size;
         MatrixPolynomial {
@@ -316,30 +387,34 @@ where
             evaluation_rows: vec![
                 input_polynomial
                     .list
-                    .iter()
+                    .par_iter() // Parallelize collection
                     .map(|ll_instance| ll_instance.even)
                     .collect(),
                 input_polynomial
                     .list
-                    .iter()
+                    .par_iter() // Parallelize collection
                     .map(|ll_instance| ll_instance.odd)
                     .collect(),
             ],
         }
     }
 
+    /// Creates a matrix from a `Vec<Vec<u32>>`, converting each `u32` to a `TowerField` element.
     pub fn from_u32(input_vec: &Vec<Vec<u32>>, num_levels: Option<usize>) -> Self {
-        // Convert u32 to F
         let n = input_vec.len();
-        let c = input_vec[0].len();
-        let mut eval_rows = Vec::with_capacity(n);
-        for u32_row in input_vec.iter() {
-            let f_row: Vec<F> = u32_row
-                .iter()
-                .map(|&u| F::new(u as u128, num_levels))
-                .collect();
-            eval_rows.push(f_row);
+        if n == 0 {
+            return MatrixPolynomial { no_of_rows: 0, no_of_columns: 0, evaluation_rows: vec![] };
         }
+        let c = input_vec[0].len();
+        let eval_rows = input_vec
+            .par_iter()
+            .map(|u32_row| {
+                u32_row
+                    .iter()
+                    .map(|&u| F::new(u as u128, num_levels))
+                    .collect::<Vec<F>>()
+            })
+            .collect();
         MatrixPolynomial {
             no_of_rows: n,
             no_of_columns: c,
@@ -347,14 +422,26 @@ where
         }
     }
 
+    /// Retrieves a specific column from the matrix as a `Vec<F>`.
     pub fn get_column(&self, column_index: usize) -> Vec<F> {
-        let mut column = Vec::with_capacity(self.no_of_rows);
-        for i in 0..self.no_of_rows {
-            column.push(self.evaluation_rows[i][column_index]);
-        }
-        column
+        self.evaluation_rows
+            .iter()
+            .map(|row| row[column_index])
+            .collect()
     }
 
+    /// Reshapes the matrix for the next sum-check round by folding in one variable.
+    ///
+    /// Doubles the number of rows (`no_of_rows *= 2`)
+    /// Halves the number of columns (`no_of_columns /= 2`).
+    /// Takes the right half of each original row `i` and makes it the new row `2*i + 1`.
+    /// Truncates the original row `i` (now new row `2*i`) to its left half.
+    ///
+    /// Example: `2x4 -> 4x2`
+    /// Row 0: `[a, b, c, d]` -> `[a, b]` (new Row 0)
+    ///                        `[c, d]` (new Row 1)
+    /// Row 1: `[e, f, g, h]` -> `[e, f]` (new Row 2)
+    ///                        `[g, h]` (new Row 3)
     pub fn heighten(&mut self) {
         // Update the dimensions of the original matrix
         self.no_of_rows *= 2;
@@ -396,6 +483,14 @@ where
         output
     }
 
+    /// Computes Merkle roots for each column, treating rows as leaves.
+    ///
+    /// For each column `x`, it takes the values `(p(b, x))_{b \in {0,1}^p}`
+    /// (where `p = log2(no_of_rows)`) and computes a Merkle root using the provided `mappings`.
+    /// The `index_j` determines which mapping function from `mappings` is used at each level
+    /// of the Merkle tree computation.
+    ///
+    /// Returns a `1 x no_of_columns` matrix containing the Merkle roots for each column.
     pub fn compute_merkle_roots(
         input_polynomial: &MatrixPolynomial<F>,
         index_j: usize,
@@ -445,6 +540,11 @@ where
         output
     }
 
+    /// Computes sums up a Merkle tree structure based on selected children.
+    ///
+    /// Given a flat `input` vector representing the leaves of a tree with `num_children` per node,
+    /// it computes the sum of specific children at each level, defined by `indices_to_combine`.
+    /// Returns a `Vec<Vec<F>>` where `output[0]` is the root sum, `output[1]` is the next level, ..., `output[depth]` is the original input.
     pub fn merkle_sums(
         input: &Vec<F>,
         num_children: usize,
@@ -478,6 +578,13 @@ where
         output
     }
 
+    /// Computes the tensor product combined with Hadamard product.
+    ///
+    /// If `self` is `m x k` and `rhs` is `n x k`, the result is `(m*n) x k`.
+    /// Row `(i*n + j)` of the output is the Hadamard product of `self`'s row `i` and `rhs`'s row `j`,
+    /// computed using the provided `mult_bb` function.
+    ///
+    /// Useful for incorporating challenges into the polynomial representation during sum-check.
     pub fn tensor_hadamard_product<P>(
         &self,
         rhs: &MatrixPolynomial<F>,
@@ -509,6 +616,20 @@ where
         output
     }
 
+    /// Computes the tensor product of multiple matrices and sums the columns.
+    ///
+    /// Given `d` matrices $M_1, ..., M_d$, each of size `rows x cols`,
+    /// this computes the tensor product $T = M_1 \otimes ... \otimes M_d$, which has dimensions
+    /// `rows^d x cols^d` (conceptually).
+    ///
+    /// It then computes a result vector `output` of length `rows^d` where `output[i]` is the sum
+    /// of elements in the i-th "row slice" of the conceptual tensor product, interpreted
+    /// differently. Specifically, `output[i]` corresponds to selecting row `i_k` from matrix `M_k`
+    /// (where `i` encodes the tuple `(i_1, ..., i_d)`), taking the Hadamard product of these rows
+    /// (using `mult_bb`), and summing the result.
+    ///
+    /// `output[idx] = sum_{j=0}^{cols-1} mult_bb(..mult_bb(M_1[i_1][j], M_2[i_2][j])..., M_d[i_d][j])`
+    /// where `idx` encodes `(i_1, ..., i_d)`.
     pub fn tensor_inner_product<P>(matrices: &Vec<MatrixPolynomial<F>>, mult_bb: &P) -> Vec<F>
     where
         P: Fn(&F, &F) -> F,
@@ -588,6 +709,7 @@ where
             .collect::<Vec<Vec<F>>>()
     }
 
+    /// Sums elements within each row, resulting in a matrix with `no_of_columns = 1`.
     pub fn collapse(&mut self) {
         if self.no_of_columns == 1 {
             return;
@@ -603,6 +725,12 @@ where
         }
     }
 
+    /// Extracts subtensors corresponding to even and odd indices along each dimension.
+    ///
+    /// Given a flat `tensor` representing evaluations of a d-variate function on a grid of size `n^d`,
+    /// extracts two subtensors: one corresponding to coordinates being all even, and one corresponding
+    /// to coordinates being all odd (modulo n).
+    /// Requires `n` to be a power of two.
     pub fn extract_subtensors(tensor: &Vec<F>, d: usize) -> (Vec<F>, Vec<F>) {
         let current_len = tensor.len();
         assert!(current_len.is_power_of_two());
@@ -629,6 +757,12 @@ where
         (even_subtensor, odd_subtensor)
     }
 
+    /// Extracts a subtensor by selecting elements with a specific offset and step along each dimension.
+    ///
+    /// Given a flat `tensor` (size `n^d`), `step`, and `offset`,
+    /// extracts elements whose multi-dimensional coordinates `(c_1, ..., c_d)` satisfy
+    /// `c_k = offset_k + j_k * step` for some `j_k`, where `offset_k = offset % n`.
+    /// This is equivalent to selecting indices `{offset, step+offset, 2*step+offset, ...}` in each dimension.
     pub fn extract_subtensor_with_offset(
         tensor: &Vec<F>,
         d: usize,
@@ -662,14 +796,21 @@ where
         subtensor
     }
 
+    /// Extracts multiple subtensors from a list of tensors based on a common step size.
+    ///
+    /// Applies `extract_subtensor_with_offset` for each offset from `0` to `step-1`
+    /// to every tensor in the input `tensors` list.
+    /// Returns a flattened list of all extracted subtensors.
     pub fn extract_subtensors_from_tensors(
         tensors: &Vec<Vec<F>>,
         d: usize,
         step: usize,
     ) -> Vec<Vec<F>> {
+        if tensors.is_empty() { return Vec::new(); }
         let current_len = tensors[0].len();
-        assert!(current_len.is_power_of_two());
-        assert!(step.is_power_of_two());
+        assert!(current_len.is_power_of_two(), "Input tensor length must be a power of two");
+        assert!(step.is_power_of_two(), "Step must be a positive power of two");
+
         let mut subtensors: Vec<Vec<F>> = Vec::with_capacity(step * tensors.len());
 
         for offset in 0..step {
@@ -682,6 +823,18 @@ where
         subtensors
     }
 
+    /// Selects specific rows within chunks and concatenates them horizontally.
+    ///
+    /// Divides the matrix rows into chunks of size `chunk_size`.
+    /// Within each chunk, it keeps only the rows specified by `indices_to_include_in_chunk`
+    /// (relative to the start of the chunk).
+    /// It then concatenates these selected rows horizontally for each chunk,
+    /// replacing the first row of the chunk and removing the others.
+    /// Modifies the matrix in place.
+    ///
+    /// Example: `chunk_size=3`, `indices=[1, 2]`
+    /// Chunk 1: [row0, row1, row2] -> Keeps [row1, row2] -> Becomes [row1 || row2]
+    /// Chunk 2: [row3, row4, row5] -> Keeps [row4, row5] -> Becomes [row4 || row5]
     pub fn extract_submatrix(
         &mut self,
         chunk_size: usize,
@@ -718,6 +871,9 @@ where
         }
     }
 
+
+    /// Computes the dot product of two matrices (treated as flattened vectors).
+    /// Uses a provided multiplication function `mult_be` (Base x Extension -> Extension).
     pub fn dot_product<OtherF, P>(
         lhs: &MatrixPolynomial<F>,
         rhs: &MatrixPolynomial<OtherF>,
@@ -743,6 +899,13 @@ where
             })
     }
 
+    /// Multiplies each column of `self` (Base Field) by a `multiplicand` column vector (Extension Field),
+    /// sums the results for each original column, and returns the outcome as a `LinearLagrangeList`.
+    ///
+    /// Specifically, `output[j].even/odd` corresponds to the sum over rows `i` of
+    /// `mult_be(self[i][2j], multiplicand[i][0])` / `mult_be(self[i][2j+1], multiplicand[i][0])`.
+    /// Assumes `multiplicand` has `no_of_columns = 1`.
+    /// Used in state extraction for Algorithm 2.
     pub fn scale_and_squash<OtherF, P>(
         self: &MatrixPolynomial<F>,
         multiplicand: &MatrixPolynomial<OtherF>,
@@ -831,6 +994,8 @@ where
         }
     }
 }
+
+// --- Debug Formatting ---
 
 impl<F: TowerField> fmt::Debug for MatrixPolynomial<F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {

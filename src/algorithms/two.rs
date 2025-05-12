@@ -76,21 +76,19 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Iterate for rounds 2, 3, ..., log(n).
         // For each round i s.t. i ≥ 2, we compute the evaluation of the round polynomial as:
         //
-        // r_i(k) = ∑_{x} p(r_1, r_2, ..., r_{i-1},  k,  x) *
-        //                q(r_1, r_2, ..., r_{i-1},  k,  x) *
-        //                h(r_1, r_2, ..., r_{i-1},  k,  x) * ...
+        // s_i(u) = ∑_{x} \prod_{k} p_k(r_1, r_2, ..., r_{i-1},  u,  x)
         //
-        // for each k = 0, 1, 2, ...
-        // Thus, we iterate over each polynomial (p, q, h, ...) to compute:
+        // for each u \in {0, inf, 2, ..., d-1}
+        // Thus, we iterate over each polynomial (p_k) to compute:
         //
-        // poly(r_1, r_2, ..., r_{i-1},  k,  x) := ∑_{y} eq(y, r_1, r_2, ..., r_{i-1}) * poly(y, k, x)
+        // p_k(r_1, r_2, ..., r_{i-1},  u,  x) := ∑_{y} eq(y, r_1, r_2, ..., r_{i-1}) * p_k(y, u, x)
         //
         // To compute this, we compute the challenge term: eq(y, r_1, r_2, ..., r_{i-1}) in the challenge matrix polynomial.
-        // Further, we multiply that with poly(y, k, x) and sum it over y to get polynomial evaluation at
-        // (r_1, r_2, ..., r_{i-1},  k,  x).
+        // Further, we multiply that with p_k(y, u, x) and sum it over y to get polynomial evaluation at
+        // (r_1, r_2, ..., r_{i-1},  u,  x).
         //
         for round_number in 2..=prover_state.num_vars {
-            for k in 0..(r_degree + 1) {
+            for u in 0..r_degree {
                 let poly_hadamard_product_len = matrix_polynomials[0].no_of_columns / 2;
                 let mut poly_hadamard_product: Vec<EF> = vec![EF::one(); poly_hadamard_product_len];
 
@@ -101,7 +99,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     // Assert that the number of rows in the challenge and witness matrix are equal.
                     assert_eq!(challenge_matrix_polynomial.no_of_rows, height);
 
-                    // This will store poly(r_1, r_2, ..., r_{i-1},  k,  x) for x ∈ {0, 1}^{l - i}.
+                    // This will store p_k(r_1, r_2, ..., r_{i-1},  u,  x) for x ∈ {0, 1}^{l - i}.
                     let mut poly_evaluation_at_k: Vec<EF> = vec![EF::zero(); width / 2];
 
                     for row_idx in 0..height {
@@ -111,8 +109,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                             .iter()
                             .zip(odd.iter())
                             .map(|(&e, &o)| {
-                                (BF::one() - BF::new(k as u128, None)) * e
-                                    + BF::new(k as u128, None) * o
+                                (BF::one() - BF::new(u as u128, None)) * e
+                                    + BF::new(u as u128, None) * o
                             })
                             .collect();
 
@@ -143,7 +141,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 }
 
                 // ATTENTION: addition of extension field elements
-                round_polynomials[round_number - 1][k as usize] = poly_hadamard_product
+                round_polynomials[round_number - 1][u as usize] = poly_hadamard_product
                     .iter()
                     .fold(EF::zero(), |acc, val| add_ee(&acc, val));
             }
@@ -176,5 +174,24 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 matrix_polynomials[j].heighten();
             }
         }
+    }
+
+    /// Algorithm 2 (with alignment as in the paper)
+    pub fn prove_streaming<BC, BE, AEE, EE>(
+        prover_state: &mut ProverState<EF, BF>,
+        bf_combine_function: &BC,
+        transcript: &mut Transcript,
+        round_polynomials: &mut Vec<Vec<EF>>,
+        mult_be: &BE,
+        add_ee: &AEE,
+        mult_ee: &EE,
+    ) where
+        BC: Fn(&Vec<BF>) -> EF + Sync,
+        BE: Fn(&BF, &EF) -> EF + Sync,
+        AEE: Fn(&EF, &EF) -> EF + Sync,
+        EE: Fn(&EF, &EF) -> EF + Sync,
+    {
+        // It's better to start from scratch, forgo anything about `MatrixPolynomial` as that's just extra overhead.
+    
     }
 }

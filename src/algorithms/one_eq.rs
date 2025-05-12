@@ -11,6 +11,7 @@ use rayon::prelude::*;
 use crate::utils::polynomial_interpolation::{barycentric_interpolation_with_infinity,
     interpolate_product_poly_evals,
 };
+use num::One;
 
 impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     /// Computes the round polynomial using Algorithm 1 (collapsing arrays) where
@@ -190,7 +191,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
     /// Helper function for Gruen's optimization.
     /// Computes evaluations of t_i(X) = sum_{x'} eq(w_[>i], x') * combine(state_polys(r_[<i], X, x'))
-    /// at points {infinity, 0, 2, ..., d-1}.
+    /// at points {0, infinity, 2, ..., d-1}. Degree of t_i is d.
+    /// Returns evals in order [t(0), t(inf), t(2), ..., t(d-1)] (length d).
     fn compute_ti_evaluations<C>(
         state_polynomials: &Vec<LinearLagrangeList<EF>>,
         eq_suffix_poly: &LinearLagrangeList<EF>,
@@ -201,11 +203,24 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         EF: TowerField + Send + Sync,
         C: Fn(&Vec<EF>) -> EF + Sync,
     {
-        // t_i has degree d. We need d+1 evaluations.
-        // Points are {infinity, 0, 2, ..., d-1}.
-        let num_evals_needed = degree_d + 1;
+        // t_i has degree d-1. We need d evaluations: {0, inf, 2, ..., d-1}.
+        let num_evals_needed = degree_d;
+        if degree_d == 0 {
+             // combine fn degree 0, t_i degree -1 (zero poly). Return empty vec?
+             // Let's assume degree_d > 0. If combine is constant, t is constant.
+             // If degree_d = 1 (combine is linear), t_i is constant.
+             // Need evals [t(0)].
+             return vec![]; // Or handle degree 1 combine case specifically?
+        }
         let state_polynomial_len = state_polynomials[0].list.len(); // Length of suffix hypercube
-        if state_polynomial_len == 0 { // Handle empty suffix case (last round)
+        if state_polynomial_len == 0 {
+            // Handle empty suffix case (last round)
+            // t_i(X) = eq(empty) * combine(state_polys(r, X)) = 1 * combine(...)
+            // Still need to compute based on the state_polynomials provided (which should be folded values)
+            // This branch likely indicates an issue, suffix should not be empty unless it's the very last folding.
+            // If num_vars = 0 initially, this might be hit.
+            // For now, assume state_polynomial_len > 0 for rounds 1..num_vars
+            // If we reach here, let's return zeros, but this might hide bugs.
             return vec![EF::zero(); num_evals_needed];
         }
 
@@ -213,12 +228,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let summed_contributions = (0..state_polynomial_len)
             .into_par_iter()
             .map(|idx| {
-                // Vector holds contributions in order [t(inf), t(0), t(2), ..., t(d-1)]
+                // Vector holds contributions in order [t(0), t(inf), t(2), ..., t(d-1)]
                 let mut contributions = vec![EF::zero(); num_evals_needed];
                 let mut evals_at_0: Vec<EF> = Vec::with_capacity(degree_d);
                 let mut evals_at_infty: Vec<EF> = Vec::with_capacity(degree_d);
 
                 // Precompute evaluations for state polynomials at 0 and infinity
+                // combine function degree is d. State polynomials have degree d.
                 for k in 0..degree_d {
                     let even_val = state_polynomials[k].list[idx].even;
                     let odd_val = state_polynomials[k].list[idx].odd;
@@ -230,36 +246,38 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 let eq_suffix_eval_at_0 = eq_suffix_poly.list[idx].even;
                 let eq_suffix_eval_at_infty = eq_suffix_poly.list[idx].odd - eq_suffix_eval_at_0;
 
-                // Compute and store t(inf) = eq_suf(inf) * combine(state_polys(inf)) at index 0
-                contributions[0] = eq_suffix_eval_at_infty * combine_function(&evals_at_infty);
+                // Compute and store t(0) = eq_suf(0) * combine(state_polys(0)) at index 0
+                contributions[0] = eq_suffix_eval_at_0 * combine_function(&evals_at_0);
 
-                // Compute and store t(0) = eq_suf(0) * combine(state_polys(0)) at index 1
-                contributions[1] = eq_suffix_eval_at_0 * combine_function(&evals_at_0);
+                // Compute and store t(inf) = eq_suf(inf) * combine(state_polys(inf)) at index 1
+                contributions[1] = eq_suffix_eval_at_infty * combine_function(&evals_at_infty);
 
                 // Compute contributions for t(2), ..., t(d-1)
-                // Start recurrence from state poly evals at 1 and eq eval at 1
-                let mut current_evals: Vec<EF> = evals_at_0
-                    .iter()
-                    .zip(&evals_at_infty)
-                    .map(|(e0, einf)| *e0 + *einf)
-                    .collect(); // p_k(1) = p_k(0) + p_k(inf)
-                let mut current_eq_suffix_eval = eq_suffix_eval_at_0 + eq_suffix_eval_at_infty; // eq_suf(1)
+                // Need d-2 more evaluations if d >= 2
+                if degree_d >= 2 {
+                    // Start recurrence from state poly evals at 1 and eq eval at 1
+                    let mut current_evals: Vec<EF> = evals_at_0
+                        .iter()
+                        .zip(&evals_at_infty)
+                        .map(|(e0, einf)| *e0 + *einf)
+                        .collect(); // p_k(1) = p_k(0) + p_k(inf)
+                    let mut current_eq_suffix_eval = eq_suffix_eval_at_0 + eq_suffix_eval_at_infty; // eq_suf(1)
 
-                // Compute contributions for u = 2 to d-1
-                // We need d-2 iterations here (from u=2 to u=d-1 inclusive)
-                // The loop stores results at index u_idx = 2 to degree_d (maps to u=2..d-1)
-                for u_idx in 2..degree_d { // Corresponds to u=2..d-1
-                    // Update state polynomial evaluations for point u
-                    for k in 0..degree_d {
-                        current_evals[k] += evals_at_infty[k]; // p_k(u) = p_k(u-1) + p_k(inf)
+                    // Compute contributions for u = 2 to d-1
+                    // Store at index u = 2 to d-1
+                    for u_val in 2..degree_d { // u = 2..d-1
+                        // Update state polynomial evaluations for point u
+                        for k in 0..degree_d {
+                            current_evals[k] += evals_at_infty[k]; // p_k(u) = p_k(u-1) + p_k(inf)
+                        }
+                        // Update eq_suffix polynomial evaluation for point u
+                        current_eq_suffix_eval += eq_suffix_eval_at_infty; // eq_suf(u) = eq_suf(u-1) + eq_suf(inf)
+
+                        // Store t(u) = eq_suf(u) * combine(state_polys(u)) at index u_val
+                        contributions[u_val] = current_eq_suffix_eval * combine_function(&current_evals);
                     }
-                    // Update eq_suffix polynomial evaluation for point u
-                    current_eq_suffix_eval += eq_suffix_eval_at_infty; // eq_suf(u) = eq_suf(u-1) + eq_suf(inf)
-
-                    // Store t(u) = eq_suf(u) * combine(state_polys(u)) at index u_idx
-                    contributions[u_idx] = current_eq_suffix_eval * combine_function(&current_evals);
                 }
-                contributions // Return contributions in order [t(inf), t(0), t(2), ..., t(d-1)]
+                contributions // Return contributions in order [t(0), t(inf), t(2), ..., t(d-1)]
             })
             .reduce(
                 || vec![EF::zero(); num_evals_needed], // Identity: zero vector
@@ -277,15 +295,14 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
     /// Computes the sumcheck proof using Gruen's optimization.
     /// This involves factoring the round polynomial s_i(X) into l_i(X) * t_i(X),
-    /// computing evaluations of t_i(X) (degree d), and deriving s_i(X).
+    /// computing evaluations of t_i(X) (degree d-1), and deriving s_i(X).
     /// This implementation does NOT use the split eq-poly optimization.
     pub fn prove_with_gruen_optimization<EC, BC, T>(
         prover_state: &mut ProverState<EF, BF>,
         initial_claimed_sum: EF, // Initial claim C_0
         ef_combine_function: &EC,
-        // Note: bc_combine_function is not needed as eq makes everything EF
         transcript: &mut Transcript,
-        round_polynomials: &mut Vec<Vec<EF>>, // Still stores s_i evaluations
+        round_polynomials: &mut Vec<Vec<EF>>, // Stores s_i evals [s(0), s(inf), s(2..d+1)]
         to_ef: &T,
     ) where
         EC: Fn(&Vec<EF>) -> EF + Sync,
@@ -294,7 +311,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         BF: Send + Sync,
         EF: TowerField + Send + Sync,
     {
-        let degree_d = prover_state.state_polynomials.len();
+        let degree_d = prover_state.state_polynomials.len(); // Degree of combine function = degree of t_i
+        let s_degree = degree_d + 1;
         let num_vars = prover_state.num_vars;
 
         assert!(
@@ -310,68 +328,53 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             .map(|list| list.convert(&to_ef))
             .collect();
 
+        // Precompute Suffix Eq Polynomial Evaluations
+        let eq_suffix_evals_list: Vec<LinearLagrangeList<EF>> = (0..=num_vars)
+            .map(|i| {
+                if i < num_vars {
+                    EqPoly::new(w[i..].to_vec()).to_linear_lagrange_list()
+                } else {
+                    LinearLagrangeList::from_vector(&vec![EF::one()])
+                }
+            })
+            .collect();
+
         let mut challenges: Vec<EF> = Vec::with_capacity(num_vars);
         let mut current_claim = initial_claimed_sum;
-        let mut eq_scalar = EF::one(); // Represents eq(w_[<i], r_[<i])
+        let mut eq_scalar = EF::one();
 
         // Process rounds
         for round_number in 1..=num_vars {
             let i = round_number;
             let w_i = w[i - 1];
 
-            // --- Compute l_i evaluations --- 
+            // Compute l_i evaluations [l(0), l(inf)]
             let l_i_eval_0 = eq_scalar * (EF::one() - w_i);
-            let l_i_eval_inf = if EF::from(2u64) == EF::zero() {
-                 eq_scalar
-            } else {
-                 (eq_scalar * w_i) - l_i_eval_0 // l(1) - l(0)
-            };
+            let l_i_eval_1 = eq_scalar;
+            let l_i_eval_inf = l_i_eval_1 - l_i_eval_0;
             let linear_evals = [l_i_eval_0, l_i_eval_inf];
 
-            // --- Compute t_i evaluations --- 
-            // Recompute eq evaluations for the current suffix w_[>i]
-            let eq_suffix_poly_i = if i < num_vars {
-                 EqPoly::new(w[i..].to_vec()).to_linear_lagrange_list()
-            } else {
-                // Last round, suffix is empty, eq(empty) = 1 (constant polynomial)
-                // Use from_vector for a single evaluation point (domain size 1)
-                LinearLagrangeList::from_vector(&vec![EF::one()])
-            };
-
-            // Compute t_i evals: [t(inf), t(0), t(2), ..., t(d-1)]
-            let t_i_evals_inf_0_2_d1 = Self::compute_ti_evaluations(
+            // Compute t_i evaluations [t(0), t(inf), t(2..d)]
+            let eq_suffix_poly_i = &eq_suffix_evals_list[i];
+            // compute_ti_evaluations expects combine degree (d), returns d+1 evals [t(0),t(inf),t(2..d)]
+            let t_i_evals = Self::compute_ti_evaluations(
                 &ef_state_polynomials,
-                &eq_suffix_poly_i,
+                eq_suffix_poly_i,
                 ef_combine_function,
-                degree_d,
+                degree_d, // Pass combine degree
             );
-            
-            // Reorder t_evals for interpolate_product_poly_evals: [t(0), t(inf), t(2..d-1)]
-            let t_evals_for_interp = {
-                let mut evals = Vec::with_capacity(degree_d);
-                if degree_d > 0 {
-                    evals.push(t_i_evals_inf_0_2_d1[1]); // t(0)
-                    evals.push(t_i_evals_inf_0_2_d1[0]); // t(inf)
-                    if degree_d > 2 {
-                         evals.extend_from_slice(&t_i_evals_inf_0_2_d1[2..]); // t(2..d-1)
-                    }
-                } else { 
-                     // degree_d = 0, t is constant t(inf)=0, t(0)=t(0). Input is [t(inf)=0, t(0)]
-                     // Expects [t(0)]. Let's assume compute_ti returns [0, t(0)]
-                     evals.push(t_i_evals_inf_0_2_d1[1]); // t(0)
-                }
-                evals
-            };
 
-            // --- Compute s_i evaluations using interpolate_product_poly_evals --- 
-            let s_i_prover_message = interpolate_product_poly_evals(
+            // Compute s_i prover message and s(1)
+            // Input t_evals: [t(0), t(inf), t(2..d-1)] (len d)
+            // Output prover_message: [s(0), s(inf), s(2..d)] and s(1) (len d+1)
+            let (s_i_prover_message, s_i_eval_1) = interpolate_product_poly_evals(
                 &linear_evals,
-                &t_evals_for_interp,
+                &t_i_evals,
                 current_claim, // hint C_{i-1}
-            ).expect("interpolate_product_poly_evals failed"); 
-            // Output format: [s(0), s(inf), s(2), ..., s(d)]
+            ).expect("interpolate_product_poly_evals failed");
 
             // Store and send prover message
+
             round_polynomials[round_number - 1] = s_i_prover_message.clone();
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
@@ -379,7 +382,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 &s_i_prover_message,
             );
 
-            // --- Get challenge and update claim --- 
+            // Get challenge and update claim
             let alpha: EF = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
                 transcript,
                 b"challenge_nextround",
@@ -387,62 +390,41 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             challenges.push(alpha);
 
             // Update current_claim = s_i(alpha)
-            // Need s_i evals at {0..d} and s(inf) for barycentric_interpolation_with_infinity
+            // Need s_i evals at {0..s_degree} = {0..d} and s(inf) for degree s_degree = d+1 poly s(X).
             let s_evals_0_to_d = {
                 let s_0 = s_i_prover_message[0];
-                let s_inf = s_i_prover_message[1]; // Leading coeff
-                let s_2_to_d = &s_i_prover_message[2..];
+                // Prover message is [s(0), s(inf), s(2), ..., s(d+1)]
+                let s_2_to_d = &s_i_prover_message[2..]; // Evals s(2)..s(d)
 
-                // Need s(1). Calculate it using l(1) and t(1)
-                let l_1 = l_i_eval_0 + l_i_eval_inf;
-                // Get t(1) from the hint logic inside interpolate_product_poly_evals (or recompute)
-                let t_0 = t_evals_for_interp[0];
-                let t_1 = if l_1.is_zero() {
-                     if current_claim != l_i_eval_0 * t_0 {
-                         // This case should have been caught by interpolate_product_poly_evals
-                         panic!("Inconsistent state after interpolate_product_poly_evals");
-                     } else {
-                         // Need to interpolate t(1) if l(1)=0
-                         let t_inf = t_evals_for_interp[1];
-                         let mut t_evals_0_and_2_up = vec![t_0];
-                         if degree_d > 2 {
-                              t_evals_0_and_2_up.extend_from_slice(&t_evals_for_interp[2..]);
-                         }
-                         barycentric_interpolation_with_infinity(&t_evals_0_and_2_up, t_inf, EF::one())
-                     }
-                 } else {
-                     let l_1_inv = l_1.inverse().expect("l(1) should be invertible");
-                     l_1_inv * (current_claim - s_0) // (C_{i-1} - s(0)) / l(1)
-                 };
-                let s_1 = l_1 * t_1;
-
-                // Assemble evals at {0, 1, ..., d}
-                let mut evals = Vec::with_capacity(degree_d + 1);
-                evals.push(s_0);
-                evals.push(s_1);
-                evals.extend_from_slice(s_2_to_d);
+                // Assemble evals at {0, 1, ..., d+1}
+                let mut evals = Vec::with_capacity(s_degree + 1); // Need d+2 evals
+                evals.push(s_0); // s(0)
+                evals.push(s_i_eval_1); // s(1)
+                evals.extend_from_slice(s_2_to_d); // s(2)..s(d)
                 evals
             };
-            let s_inf = s_i_prover_message[1]; // Leading coefficient of s_i
+            // s_inf is the leading coefficient of s(X) (degree d+1)
+            let s_inf = s_i_prover_message[1];
 
             current_claim = barycentric_interpolation_with_infinity(
-                 &s_evals_0_to_d, // Evals at 0, 1, ..., d
-                 s_inf,           // Eval at infinity (leading coeff)
+                 &s_evals_0_to_d, // Evals at 0..d (d+1 points for degree d poly)
+                 s_inf,           // Leading coefficient s(inf)
                  alpha,
             );
 
-            // --- Update state for next round --- 
+            // Update state for next round
             ef_state_polynomials
                 .par_iter_mut()
                 .for_each(|poly| poly.fold_in_half(alpha));
 
             // Update eq_scalar = eq_scalar * eq(w_i, alpha)
-            let eq_wi_alpha = w_i * alpha + (EF::one() - w_i) * (EF::one() - alpha);
+            let one_minus_wi = EF::one() - w_i;
+            let one_minus_alpha = EF::one() - alpha;
+            let eq_wi_alpha = w_i * alpha + one_minus_wi * one_minus_alpha;
             eq_scalar *= eq_wi_alpha;
-        
         }
 
-        // Final state updates (optional)
+        // Comment out assignments to non-existent fields
         // prover_state.challenges = Some(challenges);
         // prover_state.final_evaluation = Some(current_claim);
     }
@@ -460,7 +442,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         to_ef: &T,
     ) where
         EC: Fn(&Vec<EF>) -> EF + Sync,
-        BC: Fn(&Vec<BF>) -> EF + Sync, // Kept for signature compatibility
+        BC: Fn(&Vec<BF>) -> EF + Sync,
         T: Fn(&BF) -> EF + Sync,
         BF: Send + Sync,
         EF: Send + Sync,

@@ -1,4 +1,5 @@
 use crate::{tower_fields::TowerField, utils::error::SumcheckError};
+use num::{One, Zero};
 
 /// Given a vector of field elements {v_i}, compute the vector {coeff * v_i^(-1)}.
 /// This method is explicitly single-threaded.
@@ -185,222 +186,156 @@ pub fn barycentric_interpolation_with_infinity<F: TowerField>(
     evaluation_at_infinity * l_at_x + interp_poly_degree_d_minus_1
 }
 
-/// Computes the evaluations of a product polynomial s(X) = l(X) * t(X) at specific points.
+/// Interpolates the evaluations of a product polynomial `s(X) = l(X) * t(X)`.
 ///
-/// Given:
-/// - l(X): A linear polynomial, provided as evaluations `[l(0), l(∞)]`.
-/// - t(X): A polynomial of degree `d`, provided as evaluations `[t(0), t(∞), t(2), ..., t(d-1)]`.
-/// - hint: The value `T = s(0) + s(1)`.
+/// Given evaluations of a linear polynomial `l(X)` at 0 and infinity (`linear_evals = [l(0), l(inf)]`),
+/// and evaluations of a degree `d` polynomial `t(X)` at points `{0, inf, 2, ..., d-1}`
+/// (`t_evals = [t(0), t(inf), t(2), ..., t(d-1)]`), and a hint `C = s(0) + s(1)`,
+/// this function computes the required prover message for the sumcheck round, which consists
+/// of evaluations of `s(X)` (degree `d+1`) at points `{0, inf, 2, ..., d+1}`.
 ///
-/// Computes and returns the evaluations of s(X) in the format `[s(0), s(∞), s(2), ..., s(d)]`.
-/// The degree of s(X) is `d + 1`.
+/// The logic follows Gruen's optimization:
+/// 1. Compute `s(0) = l(0) * t(0)`.
+/// 2. Compute `s(1) = C - s(0)`.
+/// 3. Compute `l(1) = l(0) + l(inf)`.
+/// 4. If `l(1) == 0`, check consistency (`s(1)` must be 0). Return error if inconsistent or if l(1)=0 (as t(1) is needed).
+/// 5. Compute `t(1) = s(1) / l(1)`.
+/// 6. Compute `s(inf) = l(inf) * t(inf)`.
+/// 7. Compute `s(u) = l(u) * t(u)` for `u = 2, ..., d+1`:
+///    - `l(u)` is derived from `l(0)` and `l(inf)`.
+///    - `t(u)` is derived by interpolating `t(X)` using evaluations at `{0, 1, ..., d-1, inf}`.
+/// 8. Return `([s(0), s(inf), s(2), ..., s(d+1)], s(1))`.
 ///
+/// # Arguments
+/// * `linear_evals`: `[l(0), l(inf)]`.
+/// * `t_evals`: `[t(0), t(inf), t(2), ..., t(d-1)]`. Length `d`.
+/// * `hint`: The claimed sum `C = s(0) + s(1)`.
+///
+/// # Returns
+/// A `Result` containing `(prover_message, s(1))` on success, or `SumcheckError` on failure.
+/// `prover_message` is `[s(0), s(inf), s(2), ..., s(d+1)]`.
 pub fn interpolate_product_poly_evals<F: TowerField>(
     linear_evals: &[F; 2],
-    t_evals: &[F],
+    t_evals: &[F], // Expecting [t(0), t(inf), t(2), ..., t(d-1)] (length d)
     hint: F,
-) -> Result<Vec<F>, SumcheckError> {
-    let d = t_evals.len(); // Length of input evals, indicates degree d
-
-    // Handle t(X) degree 0 case (constant)
-    if d == 0 {
-        // If t is constant (degree 0), t_evals should be [t(0)=t(inf)]. s(X) is linear.
-        if t_evals.len() != 1 {
-            return Err(SumcheckError::InvalidRoundPolynomial);
-        }
-        let l_0 = linear_evals[0];
-        let l_inf = linear_evals[1];
-        let t_0 = t_evals[0];
-
-        let s_0 = l_0 * t_0;
-        // s(inf) is leading coeff of (l0+l_inf*X)*t0 = l_inf*t0*X + l0*t0
-        let s_inf = l_inf * t_0;
-
-        // Check hint: s(0) + s(1) = s(0) + (l(1)*t(1)) = s(0) + (l0+l_inf)*t0 = hint
-        // s(0) + (l0+l_inf)*t0 = l0*t0 + l0*t0 + l_inf*t0 = l_inf*t0
-        let l_1 = l_0 + l_inf;
-        let s_1 = l_1 * t_0; // Since t(1) = t(0)
-        if s_0 + s_1 != hint {
-            return Err(SumcheckError::InvalidRoundPolynomial);
-        }
-
-        // Output for degree 1: [s(0), s(inf)]
-        return Ok(vec![s_0, s_inf]);
-    }
-
-    // Handle t(X) degree 1 case (linear)
-    if d == 1 {
-        if linear_evals.len() != 2 {
-            return Err(SumcheckError::InvalidRoundPolynomial);
-        }
-        let l_0 = linear_evals[0];
-        let l_inf = linear_evals[1];
-        let t_0 = t_evals[0]; // Input is [t(0)]
-
-        // Calculate l(1)
-        let l_1 = l_0 + l_inf;
-
-        // Calculate t(1) using hint: l(0)t(0) + l(1)t(1) = hint
-        let s_0 = l_0 * t_0;
-        let term_l1_t1 = hint - s_0;
-
-        let t_1 = if l_1.is_zero() {
-            // If l(1) is 0, hint must equal s(0).
-            if !term_l1_t1.is_zero() {
-                return Err(SumcheckError::InvalidRoundPolynomial);
-            }
-            // If l(1)=0 and hint=s(0), t(1) could be anything based on this equation alone.
-            // However, for a linear t(X)=t0 + t_inf*X, t(1) must be t0+t_inf.
-            // We cannot determine t_inf without t(1). This seems ill-defined for linear t.
-            // Let's assume the caller ensures l(1) is non-zero for d=1 case or the hint is consistent.
-            // If l(1) is zero, then l(X) = l0 - l0*X. It evaluates to 0 at X=1.
-            // If the hint requires s(0)+s(1)=s(0), it means s(1)=0. s(1)=l(1)*t(1)=0*t(1)=0.
-            // This holds for any t(1). We can't determine t(1) uniquely.
-            // For now, return error if l(1) is zero in d=1 case, needs clarification.
-            return Err(SumcheckError::InvalidRoundPolynomial); // Cannot determine t(1) uniquely
-        } else {
-            // Calculate t(1) = (hint - s(0)) / l(1)
-            term_l1_t1 * l_1.inverse().expect("l(1) should be invertible")
-        };
-
-        // Calculate t(inf) = t(1) - t(0)
-        let t_inf = t_1 - t_0;
-
-        // Calculate s(inf) = l(inf) * t(inf)
-        let s_inf = l_inf * t_inf;
-
-        // Output for d=1 is [s(0), s(inf)], length d+1=2
-        return Ok(vec![s_0, s_inf]);
-    }
-
-    // Check input lengths
-    if linear_evals.len() != 2 {
+) -> Result<(Vec<F>, F), SumcheckError> {
+    let d = t_evals.len(); // Degree of t(X) is d
+    if d < 1 { // Need at least degree 1 for t(X) -> s(X) degree 2
+         // Handle t(X) constant case (d=0)? If combine fn is constant, t is zero poly?
+         // Assume d >= 1 for now, based on compute_ti_evaluations logic
+         // TODO: Clarify and handle d=0 case if necessary.
         return Err(SumcheckError::InvalidRoundPolynomial);
     }
-    // t_evals = [t(0), t(inf), t(2), ..., t(d-1)], length is d
-    if t_evals.len() != d {
-        // This case should ideally not happen if d is derived from t_evals.len()
-         return Err(SumcheckError::InvalidRoundPolynomial);
+    let s_degree = d + 1;
+
+    if linear_evals.len() != 2 {
+        return Err(SumcheckError::InvalidRoundPolynomial); // Input length mismatch
     }
+    if t_evals.len() != d {
+        // This check seems redundant given how d is derived, but keep for clarity
+        return Err(SumcheckError::InvalidRoundPolynomial); // Input length mismatch
+    }
+
 
     let l_0 = linear_evals[0];
     let l_inf = linear_evals[1];
     let t_0 = t_evals[0];
-    let t_inf = t_evals[1]; // Leading coefficient of t(X)
+    let t_inf = t_evals[1]; // t(inf) is the second element
 
-    // Calculate l(1)
+    // 1. Calculate s(0) = l(0) * t(0)
+    let s_0 = l_0 * t_0;
+
+    // 2. Calculate s(1) using the hint: s(1) = hint - s(0)
+    let s_1 = hint - s_0;
+
+    // 3. Calculate l(1) = l(0) + l(inf)
     let l_1 = l_0 + l_inf;
 
-    // Calculate t(1) using the hint: s(0) + s(1) = hint => l(0)t(0) + l(1)t(1) = hint
-    let s_0 = l_0 * t_0;
-    let term_l1_t1 = hint - s_0;
-
+    // 4. & 5. Calculate t(1)
     let t_1 = if l_1.is_zero() {
-        // If l(1) is 0, then hint must equal s(0) for a solution to exist.
-        if !term_l1_t1.is_zero() {
-            return Err(SumcheckError::InvalidRoundPolynomial);
+        // If l(1) is 0, then s(1) must also be 0 for consistency.
+        if !s_1.is_zero() {
+             return Err(SumcheckError::InvalidRoundPolynomial); // Hint inconsistent with l(1)=0
         }
-        // If l(1)=0 and hint=s(0), t(1) can be anything. We need to interpolate t(X)
-        // using points {0, 2, ..., d-1} and t(inf) to find t(1).
-        // Let's construct the points for standard interpolation excluding t(1).
-        let mut t_evals_for_t1_interp = vec![t_0];
-        if d > 2 {
-             t_evals_for_t1_interp.extend_from_slice(&t_evals[2..]);
-        }
-        let point_1 = F::new(1, None);
-        barycentric_interpolation_with_infinity(&t_evals_for_t1_interp, t_inf, point_1)
+        // If s(1)=0 and l(1)=0, t(1) is undetermined by hint s(1) = l(1)t(1).
+        // The interpolation step requires t(1).
+        // Returning error as we cannot proceed without a defined t(1).
+        return Err(SumcheckError::InvalidRoundPolynomial); // Cannot determine t(1) when l(1) is zero
     } else {
-        // Calculate t(1) = (hint - s(0)) / l(1)
-        // TODO: Handle potential error instead of unwrap
-        term_l1_t1 * l_1.inverse().expect("l(1) should be invertible")
+        // Calculate t(1) = s(1) / l(1)
+        s_1 * l_1.inverse().ok_or(SumcheckError::InvalidRoundPolynomial)? // Indicate inverse failure
     };
 
-    // Prepare evaluations for interpolating t(X): [t(0), t(1), t(2), ..., t(d-1)]
-    let mut t_evals_0_to_d_minus_1 = Vec::with_capacity(d);
-    t_evals_0_to_d_minus_1.push(t_0); // t(0)
-    t_evals_0_to_d_minus_1.push(t_1); // t(1)
-    if d > 2 {
-        // Add t(2)...t(d-1) from indices 2.. onwards in the input t_evals
-        t_evals_0_to_d_minus_1.extend_from_slice(&t_evals[2..]);
+    // Assemble the d+1 evaluations of t needed for interpolation over points {0, 1, ..., d-1, inf}.
+    // Order for barycentric_interpolation_with_infinity: evals at 0..d-1, then eval at infinity.
+    let mut t_interp_evals_0_to_d_minus_1 = Vec::with_capacity(d);
+    t_interp_evals_0_to_d_minus_1.push(t_0); // t(0)
+    t_interp_evals_0_to_d_minus_1.push(t_1); // t(1)
+    if d > 2 { // t_evals = [t(0), t(inf), t(2), ..., t(d-1)]
+        t_interp_evals_0_to_d_minus_1.extend_from_slice(&t_evals[2..]); // t(2) ... t(d-1)
     }
+    // t_interp_evals_0_to_d_minus_1 now contains [t(0), t(1), t(2), ..., t(d-1)]
 
-    // Calculate t(d) using interpolation with infinity
-    let point_d = F::new(d as u128, None);
-    let t_d = barycentric_interpolation_with_infinity(&t_evals_0_to_d_minus_1, t_inf, point_d);
+    // --- Calculate required s evaluations ---
+    // Need [s(0), s(inf), s(2), ..., s(d+1)] (length d+2 for degree d+1 poly)
+    let mut prover_message = Vec::with_capacity(s_degree + 1);
 
-    // We now have t(0), t(1), ..., t(d), and t(inf).
-    // We also have l(0) and l(inf).
-
-    // Calculate required evaluations of l(X): l(0), l(2), ..., l(d), l(inf)
-    let mut l_evals_needed = Vec::with_capacity(d + 1);
-    l_evals_needed.push(l_0); // l(0)
-    l_evals_needed.push(l_inf); // l(inf)
-    let mut current_l_eval = l_1; // Start from l(1) to compute l(2)
-    for _ in 2..=d {
-        current_l_eval += l_inf; // l(u) = l(u-1) + l(inf)
-        l_evals_needed.push(current_l_eval);
-    }
-    // l_evals_needed now contains [l(0), l(inf), l(2), l(3), ..., l(d)]
-
-    // Calculate required evaluations of t(X): t(0), t(2), ..., t(d), t(inf)
-    let mut t_evals_needed = Vec::with_capacity(d + 1);
-    t_evals_needed.push(t_0); // t(0)
-    t_evals_needed.push(t_inf); // t(inf)
-    if d > 2 {
-         t_evals_needed.extend_from_slice(&t_evals[2..]); // t(2)...t(d-1)
-    }
-     if d >= 2 { // Need t(d) if d>=2
-         t_evals_needed.push(t_d);
-     }
-    // t_evals_needed now contains [t(0), t(inf), t(2), ..., t(d)] (potentially missing t(2)..t(d-1) if d<3)
-    // Let's re-structure t_evals_needed properly
-    let mut t_evals_for_product = Vec::with_capacity(d + 1);
-    t_evals_for_product.push(t_0); // t(0)
-    t_evals_for_product.push(t_inf); // t(inf)
-    if d > 2 {
-        t_evals_for_product.extend_from_slice(&t_evals[2..]); // t(2..d-1)
-    }
-    if d >= 2 {
-        t_evals_for_product.push(t_d); // t(d)
-    }
-    // Correct order: [t(0), t(inf), t(2), ..., t(d)]
-
-    // Calculate the output evaluations s(X): [s(0), s(inf), s(2), ..., s(d)]
-    // Degree of s is d+1
-    let mut s_evals = Vec::with_capacity(d + 1);
-
-    // s(0) = l(0) * t(0)
-    s_evals.push(s_0);
+    // s(0) - already computed
+    prover_message.push(s_0);
 
     // s(inf) = l(inf) * t(inf) (leading coefficient of s)
     let s_inf = l_inf * t_inf;
-    s_evals.push(s_inf);
+    prover_message.push(s_inf);
 
-    // s(u) = l(u) * t(u) for u = 2..d
-    let mut current_l_val = l_1; // l(1)
-    for u_idx in 2..=d {
-        current_l_val += l_inf; // l(u) = l(u-1) + l_inf
-        let t_u = if u_idx == d {
-            t_d
+    // Compute s(u) = l(u) * t(u) for u = 2..d
+    // l(u) = l(0) + u * l(inf)
+    // t(u) is taken from t_evals for u=2..d-1, and interpolated for u=d
+    let mut current_l_eval = l_1; // Start from l(1)
+    for u_val in 2..=d {
+        current_l_eval += l_inf; // l(u) = l(u-1) + l(inf)
+
+        // Get t(u)
+        let point_u = F::new(u_val as u128, None);
+        let t_u = if u_val < d {
+            // For u = 2..d-1, t(u) is directly available in t_evals at index u.
+            // t_evals = [t(0), t(inf), t(2), ..., t(d-1)]
+            t_evals[u_val]
         } else {
-            // u_idx corresponds to index u_idx in t_evals (which starts [t(0), t(inf), t(2)...]
-            t_evals[u_idx]
+            // For u = d, interpolate t(u).
+            barycentric_interpolation_with_infinity(
+                &t_interp_evals_0_to_d_minus_1, // Evals at 0..d-1
+                t_inf,                          // Eval at infinity
+                point_u,                        // Point to evaluate at
+            )
         };
-        s_evals.push(current_l_val * t_u);
+
+        prover_message.push(current_l_eval * t_u); // s(u) = l(u) * t(u)
     }
 
-    // s_evals should now be [s(0), s(inf), s(2), ..., s(d)]
-    Ok(s_evals)
+    // Final prover message structure: [s(0), s(inf), s(2), ..., s(d)], and s(1)
+    Ok((prover_message, s_1))
+}
+
+// Helper for evaluating a polynomial given its coefficients.
+// Moved to module scope for test visibility
+#[cfg(test)]
+fn evaluate_poly<F: TowerField>(coeffs: &[F], x: F) -> F {
+    let mut res = F::zero();
+    // Evaluate using Horner's method
+    for &c in coeffs.iter().rev() {
+        res = res * x + c;
+    }
+    res
 }
 
 #[cfg(test)]
 mod test {
-    use num::Zero;
-
-    use crate::tower_fields::{binius::BiniusTowerField, TowerField};
-    use crate::utils::polynomial_interpolation::{
-        barycentric_interpolation, batch_inversion_and_multiply, barycentric_interpolation_with_infinity, interpolate_product_poly_evals
-    };
+    use super::*;
+    // Explicitly bring evaluate_poly into test module scope
+    use super::evaluate_poly;
+    use crate::tower_fields::binius::BiniusTowerField;
+    use crate::utils::error::SumcheckError;
+    use num::{One, Zero};
 
     type BF = BiniusTowerField;
 
@@ -560,151 +495,163 @@ mod test {
     // Add tests for interpolate_product_poly_evals
     #[test]
     fn test_interpolate_product_poly_evals_quadratic() {
-        // Test case from the original user-provided code (d=2)
-        // s(X) = l(X) * t(X), l is linear, t is quadratic (d=2)
-        // s(X) = (a + bX) * (c + dX + eX^2) = ac + (ad + bc)X + (ae + bd)X^2 + beX^3
+        // s(X) = l(X) * t(X), where l is linear, t is linear (t_degree=1, d=1)
+        // s(X) is quadratic (s_degree=2)
         type F = BiniusTowerField;
+        let l_0 = F::new(3, None);
+        let l_inf = F::new(2, None); // l(X) = 3 + 2X
+        let l_evals = [l_0, l_inf];
+        // t(X) is linear (degree=1). Input t_evals = [t(0), t(inf)], length d=1.
+        let t_0 = F::new(5, None);
+        let t_inf = F::new(4, None); // t(X) = 5 + 4X
+        let t_evals = &[t_0, t_inf]; // [t(0), t(inf)]
 
-        let a = F::new(3, None); // l(0)
-        let b = F::new(2, None); // l(inf)
-        let c = F::new(5, None); // t(0)
-        let d = F::new(7, None); // t(1) coeff (missing from input)
-        let e = F::new(4, None); // t(inf)
+        // Calculate expected s(X) = (3+2X)(5+4X) = 15 + 22X + 8X^2
+        let s_coeffs_exp = vec![F::new(15, None), F::new(22, None), F::new(8, None)];
+        let s_0_exp = evaluate_poly(&s_coeffs_exp, F::zero()); // 15
+        let s_1_exp = evaluate_poly(&s_coeffs_exp, F::one()); // 15 + 22 + 8 = 45
+        let s_2_exp = evaluate_poly(&s_coeffs_exp, F::new(2, None)); // 15 + 44 + 32 = 91
+        let s_inf_exp = F::new(8, None); // Leading coefficient
 
-        let l_evals = [a, b];
-        let t_evals_input = vec![c, e]; // Input: [t(0), t(inf)] (d=2)
-        let degree_t = t_evals_input.len();
+        let hint = s_0_exp + s_1_exp; // 15 + 45 = 60
 
-        // Calculate hint: s(0) + s(1)
-        let s_0 = a * c;
-        let l_1 = a + b;
-        let t_1 = c + d + e; // t(1) = t(0) + t_lin_coeff + t(inf)
-        let s_1 = l_1 * t_1;
-        let hint = s_0 + s_1;
+        let result = interpolate_product_poly_evals(&l_evals, t_evals, hint);
+        assert!(result.is_ok(), "interpolate_product_poly_evals failed: {:?}", result.err());
+        let (s_evals_prover, s_1_res) = result.unwrap();
 
-        // Call the function
-        let result = interpolate_product_poly_evals(&l_evals, &t_evals_input, hint);
-        assert!(result.is_ok());
-        let s_evals_output = result.unwrap();
-
-        // Expected output: [s(0), s(inf), s(2)] (degree d+1 = 3)
-        let expected_s_0 = a * c;
-        let expected_s_inf = b * e;
-        let l_2 = l_1 + b; // l(2) = l(1) + l(inf)
-        let t_2 = evaluate(&[c, d, e], &F::new(2, None)); // t(2)
-        let expected_s_2 = l_2 * t_2;
-
-        assert_eq!(s_evals_output.len(), degree_t + 1);
-        assert_eq!(s_evals_output[0], expected_s_0, "s(0) mismatch");
-        assert_eq!(s_evals_output[1], expected_s_inf, "s(inf) mismatch");
-        assert_eq!(s_evals_output[2], expected_s_2, "s(2) mismatch");
+        // Expected prover message for quadratic s(X) (degree 2): [s(0), s(inf), s(2)], length s_degree+1 = 3
+        assert_eq!(s_evals_prover.len(), 3, "Prover message length incorrect");
+        assert_eq!(s_evals_prover[0], s_0_exp, "s(0)");
+        assert_eq!(s_evals_prover[1], s_inf_exp, "s(inf)");
+        assert_eq!(s_evals_prover[2], s_2_exp, "s(2)");
+        assert_eq!(s_1_res, s_1_exp, "s(1)");
     }
 
-     #[test]
+    #[test]
     fn test_interpolate_product_poly_evals_cubic_t() {
-        // t is cubic (d=3), s is quartic (d+1=4)
+        // t is cubic (degree=3, d=3)
+        // s is quartic (s_degree=4)
         type F = BiniusTowerField;
+        let l_0 = F::new(2, None);
+        let l_inf = F::new(1, None); // l(X) = 2 + X
+        let l_evals = [l_0, l_inf];
 
-        let l_coeffs = [F::rand(Some(2)), F::rand(Some(2))]; // [l(0), l(inf)]
-        let t_coeffs = [F::rand(Some(2)), F::rand(Some(2)), F::rand(Some(2)), F::rand(Some(2))]; // [t0, t1, t2, t3=tinf]
-        let degree_t = 3;
+        // t(X) = 1 + 2X + 3X^2 + 4X^3 (degree=3)
+        let t_coeffs = vec![F::new(1, None), F::new(2, None), F::new(3, None), F::new(4, None)];
+        let t_0 = evaluate_poly(&t_coeffs, F::zero()); // t(0)=1
+        let t_1 = evaluate_poly(&t_coeffs, F::one()); // t(1)=10
+        let t_2 = evaluate_poly(&t_coeffs, F::new(2, None)); // t(2)=49
+        let t_inf = F::new(4, None); // Leading coeff
 
-        let t_0 = t_coeffs[0];
-        let t_inf = t_coeffs[degree_t]; // Coeff of X^3
-        let t_2 = evaluate(&t_coeffs, &F::new(2, None));
-        // Input format [t(0), t(inf), t(2)] for d=3
-        let t_evals_input = vec![t_0, t_inf, t_2];
+        // Input t_evals: [t(0), t(inf), t(2...d-1)] = [t(0), t(inf), t(2)], length d=3
+        let t_evals = &[t_0, t_inf, t_2];
 
-        // Calculate hint s(0) + s(1)
-        let l_0 = l_coeffs[0];
-        let l_inf = l_coeffs[1];
-        let s_0 = l_0 * t_0;
-        let l_1 = l_0 + l_inf;
-        let t_1 = evaluate(&t_coeffs, &F::new(1, None));
-        let s_1 = l_1 * t_1;
-        let hint = s_0 + s_1;
+        // Expected s(X) = (2+X)(1 + 2X + 3X^2 + 4X^3) = 2 + 5X + 8X^2 + 11X^3 + 4X^4 (degree s_degree=4)
+        let s_coeffs = vec![F::new(2, None), F::new(5, None), F::new(8, None), F::new(11, None), F::new(4, None)];
+        let s_0_exp = evaluate_poly(&s_coeffs, F::zero()); // 2
+        let s_1_exp = evaluate_poly(&s_coeffs, F::one()); // 30
+        let s_2_exp = evaluate_poly(&s_coeffs, F::new(2, None)); // 196
+        let s_3_exp = evaluate_poly(&s_coeffs, F::new(3, None)); // 710
+        let s_4_exp = evaluate_poly(&s_coeffs, F::new(4, None)); // 1962
+        let s_inf_exp = F::new(4, None); // Leading coeff
 
-        let result = interpolate_product_poly_evals(&l_coeffs, &t_evals_input, hint);
-        assert!(result.is_ok());
-        let s_evals_output = result.unwrap();
+        let hint = s_0_exp + s_1_exp; // 2 + 30 = 32
 
-        // Expected output: [s(0), s(inf), s(2), s(3)] (degree 4)
-        // Calculate expected values directly using polynomial definitions
-        let l0 = l_coeffs[0];
-        let li = l_coeffs[1];
-        let l1 = l0 + li;
-        let l2 = l1 + li;
-        let l3 = l2 + li;
+        let result = interpolate_product_poly_evals(&l_evals, t_evals, hint);
+         assert!(result.is_ok(), "Result was {:?}", result.err());
+        let (s_evals_prover, s_1_res) = result.unwrap();
 
-        let t0 = t_coeffs[0];
-        // Need t(1), t(2), t(3) evaluated correctly
-        let point1 = F::new(1, None);
-        let point2 = F::new(2, None);
-        let point3 = F::new(3, None);
-        let _ = evaluate(&t_coeffs, &point1);
-        let t2_calc = evaluate(&t_coeffs, &point2); // t(2) used in input was calculated this way
-        let t3 = evaluate(&t_coeffs, &point3);
-        let t_inf_calc = t_coeffs[degree_t]; // Leading coefficient t3
-
-        // Double check input t(2) matches calculated t(2)
-        assert_eq!(t_evals_input[2], t2_calc, "Input t(2) calculation mismatch in test");
-
-        let expected_s_0 = l0 * t0;
-        let expected_s_inf = li * t_inf_calc; // s(inf) = l(inf) * t(inf)
-        let expected_s_2 = l2 * t2_calc; // s(2) = l(2) * t(2)
-        let expected_s_3 = l3 * t3;     // s(3) = l(3) * t(3)
-
-        assert_eq!(s_evals_output.len(), degree_t + 1, "Output length mismatch");
-        assert_eq!(s_evals_output[0], expected_s_0, "s(0) mismatch");
-        assert_eq!(s_evals_output[1], expected_s_inf, "s(inf) mismatch");
-        assert_eq!(s_evals_output[2], expected_s_2, "s(2) mismatch");
-        assert_eq!(s_evals_output[3], expected_s_3, "s(3) mismatch");
+        // Expected prover message for quartic s(X) (degree 4): [s(0), s(inf), s(2), s(3), s(4)], length s_degree+1 = 5
+        assert_eq!(s_evals_prover.len(), 5, "Prover message length incorrect");
+        assert_eq!(s_evals_prover[0], s_0_exp, "s(0)");
+        assert_eq!(s_evals_prover[1], s_inf_exp, "s(inf)");
+        assert_eq!(s_evals_prover[2], s_2_exp, "s(2)");
+        assert_eq!(s_evals_prover[3], s_3_exp, "s(3)");
+        assert_eq!(s_evals_prover[4], s_4_exp, "s(4)");
+        assert_eq!(s_1_res, s_1_exp, "s(1)");
     }
 
-     #[test]
-    fn test_interpolate_product_poly_evals_linear_t() {
-        // t is linear (d=1), s is quadratic (d+1=2)
+    #[test]
+    fn test_interpolate_product_poly_evals_constant_t() {
+        // t is constant (degree=0, d=0). Should error.
+        // s is linear (s_degree=1)
         type F = BiniusTowerField;
+        let l_0 = F::new(7, None);
+        let l_inf = F::new(6, None); // l(X) = 7 + 6X
+        let l_evals = [l_0, l_inf];
 
-        let l_coeffs = [F::rand(Some(2)), F::rand(Some(2))]; // [l(0), l(inf)]
-        // Define t(X) = t0 + t1*X
-        let t_coeffs = [F::rand(Some(2)), F::rand(Some(2))]; // [t0, t1]
-        let degree_t = 1;
+        // t(X) is constant (degree=0). Input t_evals should be [], length d=0.
+        let t_0 = F::new(5, None); // t(X) = 5
+        let t_evals:&[F] = &[]; // Empty slice for d=0
 
-        let t_0 = t_coeffs[0];
-        let t_1_coeff = t_coeffs[1]; // Coefficient of X is t(inf) for linear
-        // Input format [t(0)] for d=1
-        let t_evals_input = vec![t_0];
+        // Calculate expected s(X) = (7+6X)(5) = 35 + 30X
+        let s_coeffs_exp = vec![F::new(35, None), F::new(30, None)];
+        let hint = F::new(100, None); // Doesn't matter, should error before use
 
-        // Calculate hint s(0) + s(1)
-        let l_0 = l_coeffs[0];
-        let l_inf = l_coeffs[1];
-        let s_0 = l_0 * t_0;
-        let l_1 = l_0 + l_inf;
-        // Calculate t(1) directly: t(1) = t0 + t1
-        let t_1_eval = t_coeffs[0] + t_coeffs[1];
-        let s_1 = l_1 * t_1_eval;
-        let hint = s_0 + s_1;
-
-        // Ensure l(1) is not zero for this test case, otherwise hint logic is ambiguous
-        if l_1.is_zero() {
-            println!("Skipping test_interpolate_product_poly_evals_linear_t because l(1) is zero");
-            return;
+        let result = interpolate_product_poly_evals(&l_evals, t_evals, hint);
+        assert!(result.is_err(), "Expected error for d=0, but got Ok");
+        match result {
+            Err(SumcheckError::InvalidRoundPolynomial) => { /* Correct error */ }
+            _ => panic!("Expected InvalidRoundPolynomial error for d=0, got {:?}", result),
         }
-
-        let result = interpolate_product_poly_evals(&l_coeffs, &t_evals_input, hint);
-        assert!(result.is_ok(), "Function returned error: {:?}", result.err());
-        let s_evals_output = result.unwrap();
-
-        // Expected output: [s(0), s(inf)] (degree d+1 = 2)
-        let expected_s_0 = l_0 * t_0;
-        let t_inf_calc = t_1_coeff; // t(inf) is the coefficient of X for linear
-        let expected_s_inf = l_inf * t_inf_calc;
-
-        assert_eq!(s_evals_output.len(), degree_t + 1, "Output length mismatch"); // Expect length 2
-        assert_eq!(s_evals_output[0], expected_s_0, "s(0) mismatch");
-        assert_eq!(s_evals_output[1], expected_s_inf, "s(inf) mismatch");
     }
 
+    // Test case where l(1) = 0
+    #[test]
+    fn test_interpolate_product_poly_evals_l1_zero() {
+         // t is linear (degree=1, d=1)
+          // s is quadratic (s_degree=2)
+        type F = BiniusTowerField;
+        // l(X) = 1 - X -> l(0)=1, l(1)=0. l(inf) = l(1)-l(0) = -1
+        let l_0 = F::one();
+        let l_inf = F::new(u128::MAX, None);
+        let l_evals = [l_0, l_inf];
+
+        // t(X) = 5 + 4X (degree=1). Input [t(0), t(inf)], length d=1.
+        let t_0 = F::new(5, None);
+        let t_inf = F::new(4, None);
+        let t_evals = &[t_0, t_inf];
+
+        // s(X) = (1-X)(5+4X) = 5 - X - 4X^2
+        let s_coeffs_exp = vec![F::new(5, None), F::new(u128::MAX, None), F::new(u128::MAX - 3, None)]; // 5, -1, -4
+        let s_0_exp = evaluate_poly(&s_coeffs_exp, F::zero()); // 5
+        let s_1_exp = evaluate_poly(&s_coeffs_exp, F::one()); // 5 - 1 - 4 = 0
+        let s_2_exp = evaluate_poly(&s_coeffs_exp, F::new(2, None)); // 5 - 2 - 16 = -13
+        let s_inf_exp = F::new(u128::MAX - 3, None); // -4
+
+        let hint = s_0_exp + s_1_exp; // 5 + 0 = 5
+
+        // Since l(1)=0, and the hint is consistent (s(1)=0), the function should return an error
+        // because it cannot determine t(1) from the hint.
+        let result = interpolate_product_poly_evals(&l_evals, t_evals, hint);
+        assert!(result.is_err(), "Expected error for l(1)=0, but got Ok");
+        match result {
+            Err(SumcheckError::InvalidRoundPolynomial) => { /* Correct error */ }
+            _ => panic!("Expected InvalidRoundPolynomial error for l(1)=0, got {:?}", result),
+        }
+    }
+
+    // Test case where l(1) = 0 and hint is inconsistent
+    #[test]
+    fn test_interpolate_product_poly_evals_l1_zero_inconsistent() {
+        type F = BiniusTowerField;
+        let l_0 = F::one();
+        let l_inf = F::new(u128::MAX, None);
+        let l_evals = [l_0, l_inf];
+        let t_0 = F::new(5, None);
+        let t_inf = F::new(4, None);
+        let t_evals = &[t_0, t_inf];
+        let s_0_exp = F::new(5, None);
+        let inconsistent_hint = s_0_exp + F::one();
+
+        let result = interpolate_product_poly_evals(&l_evals, t_evals, inconsistent_hint);
+        assert!(result.is_err());
+        // Compare the error variant correctly
+        match result {
+            Err(SumcheckError::InvalidRoundPolynomial) => { /* Correct error */ }
+            _ => panic!("Expected InvalidRoundPolynomial error, got {:?}", result),
+        }
+        // assert_eq!(result.err().unwrap(), SumcheckError::InvalidRoundPolynomial);
+    }
 
 } 
