@@ -277,7 +277,7 @@ mod simple_extension_tests {
             None,
             None,
             None,
-            None,
+            Some(claimed_sum),
         );
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");

@@ -219,6 +219,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 &ef_combine_function,
                 transcript,
                 &mut r_polys,
+                claimed_sum.unwrap(),
                 to_ef,
             ),
             AlgorithmType::WitnessChallengeSeparationWithEq => {

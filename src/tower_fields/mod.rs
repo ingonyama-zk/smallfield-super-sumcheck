@@ -43,6 +43,8 @@ pub trait TowerField:
     fn new(val: u128, num_levels: Option<usize>) -> Self;
     fn rand(num_levels: Option<usize>) -> Self;
     fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self>;
+    fn rand_non_zero(num_levels: Option<usize>) -> Self;
+    fn rand_vector_non_zero(size: usize, num_levels: Option<usize>) -> Vec<Self>;
     fn extend_num_levels(&mut self, new_levels: usize);
     fn set_num_levels(&mut self, new_levels: usize);
     fn get_val(&self) -> u128;

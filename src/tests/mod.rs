@@ -43,7 +43,7 @@ pub mod test_helpers {
             || algorithm == AlgorithmType::NaiveWithEq
             || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq;
         let eq_challenges = if is_algo_with_eq_poly {
-            let eq_challenges = EF::rand_vector(nv, Some(num_levels));
+            let eq_challenges = EF::rand_vector_non_zero(nv, Some(7));
             let eq_challenges_evals = EqPoly::new(eq_challenges.clone()).compute_evals(false);
             polynomial_hadamard_ef
                 .iter_mut()
