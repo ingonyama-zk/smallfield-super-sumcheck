@@ -3,7 +3,8 @@ use std::time::Instant;
 use ark_std::log2;
 use merlin::Transcript;
 use rayon::iter::{
-    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
 };
 
 use crate::btf_transcript::TFTranscriptProtocol;
@@ -304,6 +305,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let mut pre_computed_array_with_eq: Vec<Vec<EF>> = vec![vec![]; round_small_val];
 
         // We need to process rounds sequentially because each depends on the previous
+        // Actually, we can parallelize this as well but since round_small_val is typically
+        // a small number, we can just do it sequentially
         for round_number in (1..=round_small_val).rev() {
             // Get the eq 1 right evaluations for this round
             let eq_1_right_for_round = &eq_1_right_staged_evals[round_number - 1];
@@ -322,8 +325,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     assert_eq!(witness_row.len(), eq_1_right_size);
                     // Compute inner product with eq1 evaluations
                     witness_row
-                        .iter()
-                        .zip(eq_1_right_for_round.iter())
+                        .par_iter()
+                        .zip(eq_1_right_for_round.par_iter())
                         .map(|(w_val, eq_1_challenge)| mult_ee(w_val, eq_1_challenge))
                         .sum()
                 })
