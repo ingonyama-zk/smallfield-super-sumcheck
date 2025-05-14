@@ -480,7 +480,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
     {
         // Extract the equality polynomial from the prover state
         let eq_challenges = prover_state.eq_challenges.clone().unwrap();
-        assert_eq!(
+        debug_assert_eq!(
             eq_challenges.len(),
             prover_state.num_vars,
             "Number of equality challenges must match the number of variables"

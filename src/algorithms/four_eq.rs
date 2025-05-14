@@ -39,15 +39,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // We apply small value sumcheck for first t rounds
         // and we apply small space sumcheck for first (n / 2) rounds
         // We must ensure t ≤ n/2
-        assert!(round_small_val <= prover_state.num_vars / 2);
+        debug_assert!(round_small_val <= prover_state.num_vars / 2);
 
         // Number of eq challenges must be equal to the number of rounds
-        assert!(
+        debug_assert!(
             prover_state.eq_challenges.is_some(),
             "Equality poly challenges cannot be `None`."
         );
         let eq_challenges = prover_state.eq_challenges.clone().unwrap();
-        assert_eq!(eq_challenges.len(), prover_state.num_vars);
+        debug_assert_eq!(eq_challenges.len(), prover_state.num_vars);
 
         // First, lets compute the challenge pre-computation terms
         //
@@ -130,7 +130,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Assert that the number of evaluations is correct
         for i in 0..eq_1_right_staged_evals.len() {
             let len_eq_1_right = eq_1_right_staged_evals[i].len(); // 2^{n/2 - i - 1}
-            assert_eq!(
+            debug_assert_eq!(
                 log2(len_eq_1_right) as usize,
                 (prover_state.num_vars / 2 - 1 - i)
             );
@@ -212,8 +212,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings)
                         .evaluation_rows[0]
                         .to_vec();
-                assert_eq!(cumulative_matrix_row_for_j.len(), matrix_row_for_j.len());
-                assert_eq!(
+                debug_assert_eq!(cumulative_matrix_row_for_j.len(), matrix_row_for_j.len());
+                debug_assert_eq!(
                     cumulative_matrix_row_for_j.len(),
                     1 << (prover_state.num_vars - round_small_val)
                 );
@@ -227,14 +227,14 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .push(cumulative_matrix_row_for_j);
         }
 
-        // Santiy checks
+        // Sanity checks
         let round_small_evals_size = 1 << (prover_state.num_vars - round_small_val);
-        assert_eq!(precomputed_witness_matrix.no_of_rows, num_product_terms);
-        assert_eq!(
+        debug_assert_eq!(precomputed_witness_matrix.no_of_rows, num_product_terms);
+        debug_assert_eq!(
             precomputed_witness_matrix.no_of_columns,
             round_small_evals_size
         );
-        assert!(precomputed_witness_matrix.no_of_columns % eq_2_evals.len() == 0);
+        debug_assert!(precomputed_witness_matrix.no_of_columns % eq_2_evals.len() == 0);
 
         // Let us compute the witness multiplied by eq2 evaluations
         // The precomputed witness matrix is of size: 2^t x (N / 2^t)
@@ -310,7 +310,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .evaluation_rows
                 .par_iter()
                 .map(|witness_row| {
-                    assert_eq!(witness_row.len(), eq_1_right_size);
+                    debug_assert_eq!(witness_row.len(), eq_1_right_size);
                     // Compute inner product with eq1 evaluations
                     witness_row
                         .par_iter()
@@ -396,8 +396,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             // the pre-computed array of size (d + 1)^t
             let precomputed_array_for_this_round: &Vec<EF> =
                 &pre_computed_array_with_eq[round_num - 1];
-            assert_eq!(precomputed_array_for_this_round.len(), round_size);
-            assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
+            debug_assert_eq!(precomputed_array_for_this_round.len(), round_size);
+            debug_assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
 
             // Compute the intermediate round polynomial
             //
@@ -572,7 +572,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             let final_round_poly_eval =
                 mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
             round_polynomials[round_num - 1].insert(num_witness_polys - 1, final_round_poly_eval);
-            assert_eq!(
+            debug_assert_eq!(
                 round_polynomials[round_num - 1].len(),
                 num_witness_polys + 1
             );
@@ -659,7 +659,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
 
             let state_poly_size = ef_state_polynomials[0].list.len();
-            assert_eq!(state_poly_size, 1 << (prover_state.num_vars - round_num));
+            debug_assert_eq!(state_poly_size, 1 << (prover_state.num_vars - round_num));
 
             let (alpha, rp_at_1) = Self::compute_round_polynomial_with_split_eq::<EC, EF>(
                 round_num,
