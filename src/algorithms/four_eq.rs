@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use ark_std::log2;
 use merlin::Transcript;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
@@ -638,7 +638,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
 
         // Process next rounds until the (n / 2)th round
         for round_num in (round_small_val + 1)..=(prover_state.num_vars / 2) {
-            let start = Instant::now();
             // Compute the current eq1 left and challenge value
             // er + (1 - e)(1 - r) = 2er - e - r + 1
             let eq_challenge = eq_challenges[round_num - 2];
@@ -654,201 +653,34 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             let state_poly_size = ef_state_polynomials[0].list.len();
             assert_eq!(state_poly_size, 1 << (prover_state.num_vars - round_num));
 
-            let eq_challenge_value = eq_challenges[round_num - 1];
-            let mut intermediate_round_poly: Vec<EF> = Vec::with_capacity(num_evals as usize);
-
-            // Compute the evals for k = 0, 2, ..., d - 1, ∞
-            for k in 0..=num_witness_polys {
-                // Skip the evaluation for k = 1
-                if k == 1 {
-                    continue;
-                }
-
-                // Compute the eq1 centre evaluation
-                // (1 - k)(1 - e) + ke = 2ke - k - e + 1
-                let k_val = BF::new(k as u128, Some(3));
-                let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
-                let eq_1_center_evaluation = k_times_eq_challenge_value
-                    + k_times_eq_challenge_value
-                    - EF::new(k as u128, None)
-                    - eq_challenge_value
-                    + EF::one();
-
-                // Evaluation points
-                let k_val = EF::new(k as u128, None);
-
-                // Compute the witness products
-                // TODO: check if we can avoid mult by k
-                let mut witness_products = vec![EF::one(); state_poly_size];
-
-                if k == 0 {
-                    // For k = 0, we need to compute the witness products
-                    // using the witness polynomials
-                    for poly in &ef_state_polynomials {
-                        for (i, witness) in poly.list.iter().enumerate() {
-                            witness_products[i] = mult_ee(&witness_products[i], &witness.even);
-                        }
-                    }
-                } else if k == num_witness_polys {
-                    // For k = ∞, we need to compute the witness products
-                    // using the witness polynomials
-                    for poly in &ef_state_polynomials {
-                        for (i, witness) in poly.list.iter().enumerate() {
-                            witness_products[i] =
-                                mult_ee(&witness_products[i], &(witness.even - witness.odd));
-                        }
-                    }
-                } else {
-                    // For k = 2, 3, ..., d - 1, we need to compute the witness products
-                    // using the witness polynomials
-                    for poly in &ef_state_polynomials {
-                        for (i, witness) in poly.list.iter().enumerate() {
-                            witness_products[i] = mult_ee(
-                                &witness_products[i],
-                                &(witness.even + k_val * (witness.odd - witness.even)),
-                            );
-                        }
-                    }
-                }
-
-                let elapsed = start.elapsed();
-                println!(
-                    "          round_{}, k_{}: poly eval: {:?}",
-                    round_num, k, elapsed
-                );
-                let start: Instant = Instant::now();
-
-                // TODO: move this eq poly and witness poly computation to a standalone function
-                // Now merge the witness products with the eq1 right and eq2 evaluations
-                // Fetch the equality polynomials for this round
-                let eq_1_right_for_round = &eq_1_right_staged_evals[round_num - 1];
-                let eq_2_for_round = &eq_2_evals;
-                assert_eq!(
-                    witness_products.len(),                            // 2^{n - i}
-                    eq_1_right_for_round.len() * eq_2_for_round.len() // 2^{n/2-i} * 2^{n/2} = 2^{n-i}
-                );
-
-                // Now multiply the witness products with eq2 evaluations
-                let mut witness_prod_and_eq_2: Vec<EF> =
-                    vec![EF::zero(); eq_1_right_for_round.len()];
-
-                for (w_idx, witness_prod) in witness_products.iter().enumerate() {
-                    let eq_2_idx = w_idx % eq_2_for_round.len();
-                    let eq_1_right_idx = w_idx / eq_2_for_round.len();
-                    witness_prod_and_eq_2[eq_1_right_idx] +=
-                        mult_ee(witness_prod, &eq_2_for_round[eq_2_idx]);
-                }
-
-                // Now multiply the resulting vec with the eq1 evaluations
-                let witness_prod_eq_1_eq_2: EF = witness_prod_and_eq_2
-                    .iter()
-                    .zip(eq_1_right_for_round.iter())
-                    .map(|(witness_and_eq2_term, eq_1_right_term)| {
-                        mult_ee(witness_and_eq2_term, eq_1_right_term)
-                    })
-                    .fold(EF::zero(), |acc, val| acc + val);
-                // TODO: move this eq poly and witness poly computation to a standalone function
-
-                // Push the intermediate round polynomial evaluation
-                let intermediate_round_poly_evaluation =
-                    mult_ee(&eq_1_left_cumulative, &witness_prod_eq_1_eq_2);
-                intermediate_round_poly.push(intermediate_round_poly_evaluation);
-
-                // Compute the round polynomial evaluation
-                let round_poly_idx = if k == 0 { 0 } else { k - 1 };
-                round_polynomials[round_num - 1][round_poly_idx] =
-                    mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
-
-                let elapsed = start.elapsed();
-                println!(
-                    "          round_{}, k_{}: witness-eq mults: {:?}",
-                    round_num, k, elapsed
-                );
-            }
-
-            let start: Instant = Instant::now();
-
-            // Now we have a slightly tricky situation. We can derive the evaluation of the round polynomial
-            // at k = 1 from the claimed sum, but we need to find the evaluation of the intermediate round polynomial
-            // at k = 1. We can see that for k = 1:
-            // s_i(1) = w_i * irp_i(1)
-            // where w_i is i-th eq challenge and irp_i(k) is the intermediate round polynomial
-            // because eq_1_centre = (1 - k)(1 - e) + ke = e when k = 1.
-            // So we can compute the evaluation of the intermediate round polynomial at k = 1 by
-            // irp_i(1) = s_i(1) / w_i
-            // and then we can interpolate the intermediate round polynomial to get its evaluation at k = d.
-            //
-            // Note: see verifier for why we multiply the current sum with the scaled determinant.
-            let modified_current_sum = mult_be(scaled_determinant, &current_sum);
-            let derived_round_poly_evaluation_at_1 =
-                modified_current_sum - round_polynomials[round_num - 1][0];
-            // TODO: send eq i inverses as input to prover
-            let derived_intermediate_round_poly_evaluation_at_1 =
-                derived_round_poly_evaluation_at_1 * eq_challenge_value.inverse().unwrap();
-            intermediate_round_poly.insert(1, derived_intermediate_round_poly_evaluation_at_1);
-            let intermediate_round_poly_evaluation_at_infty =
-                intermediate_round_poly.pop().unwrap();
-
-            // Interpolate the intermediate round polynomial to get its evaluation at k = d
-            let intermediate_round_poly_final_eval = barycentric_interpolation_with_infinity(
-                &intermediate_round_poly,
-                intermediate_round_poly_evaluation_at_infty,
-                EF::new(num_witness_polys as u128, Some(2)),
-            );
-
-            // Compute the eq1 centre evaluation at k = d: (1 - k)(1 - e) + ke
-            let final_k_val = BF::new(num_witness_polys as u128, Some(2));
-            let k_times_eq_challenge_value = mult_be(&final_k_val, &eq_challenge_value);
-            let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
-                - EF::new(num_witness_polys as u128, None)
-                - eq_challenge_value
-                + EF::one();
-
-            // Compute and insert the final round polynomial evaluation
-            // Round polynomial will be of the form: s(0) s(2) ... s(d - 1) s(d) s(∞)
-            let final_round_poly_eval =
-                mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_final_eval);
-            round_polynomials[round_num - 1].insert(num_witness_polys - 1, final_round_poly_eval);
-            assert_eq!(
-                round_polynomials[round_num - 1].len(),
-                num_witness_polys + 1
-            );
-
-            // Update the current sum for the next round
-            let mut current_round_poly_evals = round_polynomials[round_num - 1].clone();
-            current_round_poly_evals.insert(1, derived_round_poly_evaluation_at_1);
-            let current_round_poly_at_infty = current_round_poly_evals.pop().unwrap();
-
-            let elapsed = start.elapsed();
-            println!("        round_{}: gruen opt: {:?}", round_num, elapsed);
-
-            // append the round polynomial (i.e. prover message) to the transcript
-            <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
+            let (alpha, rp_at_1) = Self::compute_round_polynomial_with_split_eq::<EC, EF>(
+                round_num,
+                &ef_state_polynomials,
+                &eq_1_left_cumulative,
+                &eq_challenges[round_num - 1],
+                &eq_1_right_staged_evals[round_num - 1],
+                &eq_2_evals,
+                round_polynomials,
+                &current_sum,
+                num_witness_polys,
+                ef_combine_function,
                 transcript,
-                b"r_poly",
-                &round_polynomials[round_num - 1],
             );
 
-            // generate challenge α_i = H( transcript );
-            let alpha = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
-                transcript,
-                b"challenge_nextround",
-            );
-
-            // Compute r_{i}(α_i) using the interpolation formula with infinity
-            current_sum = barycentric_interpolation_with_infinity(
-                &current_round_poly_evals,   // s(0), s(1), ..., s(d)
-                current_round_poly_at_infty, // s(inf)
-                alpha,                       // α_i
-            );
-
-            // Store the challenge in the challenge vector
             challenge_vector.push(alpha);
 
-            // update the state polynomials
-            for j in 0..ef_state_polynomials.len() {
-                ef_state_polynomials[j].fold_in_half(alpha);
-            }
+            // Update the current sum
+            current_sum = Self::evaluate_round_poly_at_challenge(
+                round_polynomials,
+                round_num,
+                rp_at_1,
+                alpha,
+            );
+
+            // update the state polynomials in parallel
+            ef_state_polynomials
+                .par_iter_mut()
+                .for_each(|poly| poly.fold_in_half(alpha));
         }
 
         let elapsed = start.elapsed();
