@@ -193,11 +193,6 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             modified_current_sum - round_polynomials[round_num - 1][0];
 
         // Calculate intermediate round polynomial evaluation at k = 1
-        println!("eq_challenge_value: {:?}", eq_challenge_value);
-        println!(
-            "eq_challenge_value inverse: {:?}",
-            eq_challenge_value.inverse()
-        );
         let derived_intermediate_round_poly_evaluation_at_1 =
             derived_round_poly_evaluation_at_1 * eq_challenge_value.inverse().unwrap();
 

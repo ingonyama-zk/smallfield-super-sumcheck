@@ -1,5 +1,8 @@
+use std::time::Instant;
+
 use ark_std::log2;
 use merlin::Transcript;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
@@ -48,6 +51,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // First, lets compute the challenge pre-computation terms
         //
         // Split the eq challenges into two parts: first eq contains
+        let start = Instant::now();
         let (eq_1_basis, eq_2_basis) = eq_challenges.split_at(prover_state.num_vars / 2);
 
         // First equality polynomial is of the form: [ α_1, α_2, ..., α_{n/2} ]
@@ -87,14 +91,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         //
         // TODO: Can we optimise by trying to compute L and R using common multiplications?
         //
-        let mut eq_1_left_basis = eq_1_basis.to_vec();
-        eq_1_left_basis.pop();
         let mut eq_1_right_basis = eq_1_basis[1..].to_vec();
         eq_1_right_basis.reverse();
-
-        let eq_1_left_poly = EqPoly::new(eq_1_left_basis);
-        let mut eq_1_left_staged_evals = eq_1_left_poly.compute_staged_evals(false);
-        eq_1_left_staged_evals.insert(0, vec![EF::one()]);
 
         let eq_1_right_poly = EqPoly::new(eq_1_right_basis);
         let mut eq_1_right_staged_evals = eq_1_right_poly.compute_staged_evals(true);
@@ -130,15 +128,16 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         let eq_2_evals = eq_2_poly.compute_evals(false);
 
         // Assert that the number of evaluations is correct
-        assert_eq!(eq_1_left_staged_evals.len(), eq_1_right_staged_evals.len());
         for i in 0..eq_1_right_staged_evals.len() {
-            let len_eq_1_left = eq_1_left_staged_evals[i].len(); // 2^{i}
             let len_eq_1_right = eq_1_right_staged_evals[i].len(); // 2^{n/2 - i - 1}
-            let log_len_eq_1 = log2(len_eq_1_left * len_eq_1_right) as usize; // n/2 - 1
-            let log_len_eq_2 = log2(eq_2_evals.len()) as usize; // n/2
-            assert_eq!(log_len_eq_1, (prover_state.num_vars / 2 - 1));
-            assert_eq!(log_len_eq_1 + log_len_eq_2, prover_state.num_vars - 1);
+            assert_eq!(
+                log2(len_eq_1_right) as usize,
+                (prover_state.num_vars / 2 - 1 - i)
+            );
         }
+
+        let elapsed = start.elapsed();
+        println!("    eq1 and eq2: {:?}", elapsed);
 
         // Create and fill witness matrix polynomials.
         // We need to represent state polynomials in matrix form for this algorithm because:
@@ -156,6 +155,7 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // +---------------------+-------------------------+----------------------------+
         //
         // and so on.
+        let start = Instant::now();
         let mut matrix_polynomials = prover_state
             .state_polynomials
             .iter()
@@ -202,6 +202,10 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             evaluation_rows: Vec::with_capacity(num_product_terms),
         };
         for j in 0..num_product_terms {
+            // [.. p(0) ..] n
+            // [.. p(1) ..] n
+            // [.. p(2) ..] n
+            // total = 2n bb mult
             let mut cumulative_matrix_row_for_j =
                 MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings)
                     .evaluation_rows[0]
@@ -227,6 +231,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .push(cumulative_matrix_row_for_j);
         }
 
+        let elapsed = start.elapsed();
+        println!("    precomputed witness matrix: {:?}", elapsed);
+
         // Santiy checks
         let round_small_evals_size = 1 << (prover_state.num_vars - round_small_val);
         assert_eq!(precomputed_witness_matrix.no_of_rows, num_product_terms);
@@ -235,6 +242,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             round_small_evals_size
         );
         assert!(precomputed_witness_matrix.no_of_columns % eq_2_evals.len() == 0);
+
+        let start = Instant::now();
 
         // Let us compute the witness multiplied by eq2 evaluations
         // The precomputed witness matrix is of size: 2^t x (N / 2^t)
@@ -296,6 +305,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             compressed_witness_with_eq_2.extract_submatrix(num_evals, projection_mapping_indices);
         }
 
+        let elapsed = start.elapsed();
+        println!("    precomputed witness with eq: {:?}", elapsed);
+
         // Now we will start the actual sumcheck protocol
         // Initialise empty challenge matrix
         let mut challenge_matrix: MatrixPolynomial<EF> = MatrixPolynomial::<EF> {
@@ -326,6 +338,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         //
         let mut interpolated_challenge_matrix_polynomial: MatrixPolynomial<EF> =
             MatrixPolynomial::one();
+
+        let start = Instant::now();
 
         // Round computation starts here for first t rounds:
         // The round polynomial is of the form:
@@ -599,6 +613,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 .tensor_hadamard_product(&challenge_tuple_matrix, &mult_ee);
         }
 
+        let elapsed = start.elapsed();
+        println!("    small_val rounds: {:?}", elapsed);
+
+        let start = Instant::now();
+
         // Okay so we've computed the first t rounds using the small-value trick (with eq polynomial).
         // Next, we need to compute the next (n / 2 - t) rounds using just the eq trick.
         // To do so, we update the witness polynomials to substitute the round challenges:
@@ -608,12 +627,18 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // for all witness polynomials (i.e., i ∈ {1, 2, ..., d})
         //
         let mut ef_state_polynomials: Vec<LinearLagrangeList<EF>> = matrix_polynomials
-            .iter()
+            .into_par_iter()
             .map(|matrix_poly| matrix_poly.scale_and_squash(&challenge_matrix_polynomial, &mult_be))
             .collect();
 
+        let elapsed = start.elapsed();
+        println!("        squash witness polynomials: {:?}", elapsed);
+
+        let start = Instant::now();
+
         // Process next rounds until the (n / 2)th round
         for round_num in (round_small_val + 1)..=(prover_state.num_vars / 2) {
+            let start = Instant::now();
             // Compute the current eq1 left and challenge value
             // er + (1 - e)(1 - r) = 2er - e - r + 1
             let eq_challenge = eq_challenges[round_num - 2];
@@ -686,6 +711,13 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     }
                 }
 
+                let elapsed = start.elapsed();
+                println!(
+                    "          round_{}, k_{}: poly eval: {:?}",
+                    round_num, k, elapsed
+                );
+                let start: Instant = Instant::now();
+
                 // TODO: move this eq poly and witness poly computation to a standalone function
                 // Now merge the witness products with the eq1 right and eq2 evaluations
                 // Fetch the equality polynomials for this round
@@ -726,7 +758,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 let round_poly_idx = if k == 0 { 0 } else { k - 1 };
                 round_polynomials[round_num - 1][round_poly_idx] =
                     mult_ee(&eq_1_center_evaluation, &intermediate_round_poly_evaluation);
+
+                let elapsed = start.elapsed();
+                println!(
+                    "          round_{}, k_{}: witness-eq mults: {:?}",
+                    round_num, k, elapsed
+                );
             }
+
+            let start: Instant = Instant::now();
 
             // Now we have a slightly tricky situation. We can derive the evaluation of the round polynomial
             // at k = 1 from the claimed sum, but we need to find the evaluation of the intermediate round polynomial
@@ -779,6 +819,9 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             current_round_poly_evals.insert(1, derived_round_poly_evaluation_at_1);
             let current_round_poly_at_infty = current_round_poly_evals.pop().unwrap();
 
+            let elapsed = start.elapsed();
+            println!("        round_{}: gruen opt: {:?}", round_num, elapsed);
+
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
@@ -807,6 +850,11 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
+
+        let elapsed = start.elapsed();
+        println!("    eq_split rounds till n/2: {:?}", elapsed);
+
+        let start = Instant::now();
 
         // Before we process the last (n / 2) rounds using the naive algorithm, we need to update
         // the equality polynomial. Let's first update the eq1 cumulative value using the latest challenge.
@@ -851,5 +899,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 ef_state_polynomials[j].fold_in_half(alpha);
             }
         }
+
+        let elapsed = start.elapsed();
+        println!("    linear_rounds till n: {:?}", elapsed);
     }
 }

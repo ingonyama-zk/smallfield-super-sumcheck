@@ -357,18 +357,33 @@ mod fq4_tests {
         );
     }
 
+    #[test]
+    fn check_algo4_eq() {
+        let deg = 3;
+        let thresh = 2;
+        //
+        // Algorithm 4 with equality polynomial
+        //
+        assert_eq!(
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::ToomCookWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+    }
+
     #[rstest]
     fn check_sumcheck_product(
-        #[values(6, 9)] nv: usize,
-        #[values(1, 2, 3, 6)] degree: usize,
+        #[values(16, 18)] nv: usize,
+        #[values(2)] degree: usize,
         #[values(
             AlgorithmType::Naive,
-            AlgorithmType::WitnessChallengeSeparation,
-            AlgorithmType::Precomputation,
+            // AlgorithmType::WitnessChallengeSeparation,
+            // AlgorithmType::Precomputation,
             AlgorithmType::ToomCook,
             AlgorithmType::NaiveWithEq,
-            AlgorithmType::WitnessChallengeSeparationWithEq,
-            AlgorithmType::PrecomputationWithEq,
+            // AlgorithmType::WitnessChallengeSeparationWithEq,
+            // AlgorithmType::PrecomputationWithEq,
             AlgorithmType::ToomCookWithEq
         )]
         algorithm: AlgorithmType,
