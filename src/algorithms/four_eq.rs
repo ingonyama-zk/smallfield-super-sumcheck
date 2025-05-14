@@ -2,7 +2,9 @@ use std::time::Instant;
 
 use ark_std::log2;
 use merlin::Transcript;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 use crate::btf_transcript::TFTranscriptProtocol;
 use crate::data_structures::{LinearLagrangeList, MatrixPolynomial};
@@ -258,50 +260,80 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             ],
         };
 
-        for (row_idx, witness_row) in precomputed_witness_matrix
-            .evaluation_rows
-            .iter()
-            .enumerate()
-        {
-            for (chunk_idx, witness_chunk) in witness_row.chunks(eq_2_evals.len()).enumerate() {
-                compressed_witness_with_eq_2.evaluation_rows[row_idx][chunk_idx] = witness_chunk
-                    .iter()
-                    .zip(&eq_2_evals)
-                    .map(|(w_val, eq_2_challenge)| mult_be(w_val, eq_2_challenge))
-                    .sum();
+        // Process columns in parallel first, then rows
+        let compressed_eq_2_results: Vec<Vec<EF>> = (0..num_columns_in_compressed_witness)
+            .into_par_iter()
+            .map(|chunk_idx| {
+                let col_start = chunk_idx * eq_2_evals.len();
+                let col_end = (chunk_idx + 1) * eq_2_evals.len();
+
+                // Create a vector to hold results for each row in this column chunk
+                let mut column_results = vec![EF::zero(); precomputed_witness_matrix.no_of_rows];
+
+                // Process each row for this column chunk
+                for row_idx in 0..precomputed_witness_matrix.no_of_rows {
+                    let witness_row = &precomputed_witness_matrix.evaluation_rows[row_idx];
+
+                    // Since we know witness_chunk is exactly divided by eq_2_len,
+                    // we can directly take the slice without bounds checking
+                    let witness_chunk = &witness_row[col_start..col_end];
+
+                    // Compute inner product with eq_2_evals
+                    let inner_product = witness_chunk
+                        .iter()
+                        .zip(&eq_2_evals)
+                        .map(|(w_val, eq_2_challenge)| mult_be(w_val, eq_2_challenge))
+                        .sum();
+
+                    // Store the result for this row
+                    column_results[row_idx] = inner_product;
+                }
+                column_results
+            })
+            .collect();
+
+        // Store the results in the compressed_witness_with_eq_2 matrix
+        for row_idx in 0..precomputed_witness_matrix.no_of_rows {
+            for chunk_idx in 0..num_columns_in_compressed_witness {
+                compressed_witness_with_eq_2.evaluation_rows[row_idx][chunk_idx] =
+                    compressed_eq_2_results[chunk_idx][row_idx];
             }
         }
 
         // Let us iterate over the precomputed matrix and compute the witness terms
-        // for each round.
         let mut pre_computed_array_with_eq: Vec<Vec<EF>> = vec![vec![]; round_small_val];
 
+        // We need to process rounds sequentially because each depends on the previous
         for round_number in (1..=round_small_val).rev() {
-            // Now lets squash the compressed witness matrix rows to get a single row
             // Get the eq 1 right evaluations for this round
-            // Lets start by some assertions on the sizes
             let eq_1_right_for_round = &eq_1_right_staged_evals[round_number - 1];
             let eq_1_right_size = eq_1_right_for_round.len();
             let round_size = num_evals.pow(round_number as u32);
-            assert_eq!(compressed_witness_with_eq_2.no_of_rows, round_size);
-            assert_eq!(compressed_witness_with_eq_2.no_of_columns, eq_1_right_size);
 
-            // Now multiply the resulting matrix with the eq1 evaluations
-            let mut compressed_witness_eq_1_eq_2: Vec<EF> = Vec::with_capacity(round_size);
-            for witness_row in compressed_witness_with_eq_2.evaluation_rows.iter() {
-                assert_eq!(witness_row.len(), eq_1_right_size);
-                let ip = witness_row
-                    .iter()
-                    .zip(eq_1_right_for_round.iter())
-                    .map(|(w_val, eq_1_challenge)| mult_ee(w_val, eq_1_challenge))
-                    .sum();
-                compressed_witness_eq_1_eq_2.push(ip);
-            }
+            // Verify matrix dimensions
+            debug_assert_eq!(compressed_witness_with_eq_2.no_of_rows, round_size);
+            debug_assert_eq!(compressed_witness_with_eq_2.no_of_columns, eq_1_right_size);
 
-            // Push the compressed witness matrix for this round to the pre-computed array
+            // Parallelize the inner product computation
+            let compressed_witness_eq_1_eq_2: Vec<EF> = compressed_witness_with_eq_2
+                .evaluation_rows
+                .par_iter()
+                .map(|witness_row| {
+                    assert_eq!(witness_row.len(), eq_1_right_size);
+                    // Compute inner product with eq1 evaluations
+                    witness_row
+                        .iter()
+                        .zip(eq_1_right_for_round.iter())
+                        .map(|(w_val, eq_1_challenge)| mult_ee(w_val, eq_1_challenge))
+                        .sum()
+                })
+                .collect();
+
+            // Store the result for this round
             pre_computed_array_with_eq[round_number - 1] = compressed_witness_eq_1_eq_2;
 
-            // Update extracted witness for next round
+            // Update the witness matrix for the next round
+            // This step needs to be sequential since it modifies the matrix in-place
             compressed_witness_with_eq_2.extract_submatrix(num_evals, projection_mapping_indices);
         }
 
