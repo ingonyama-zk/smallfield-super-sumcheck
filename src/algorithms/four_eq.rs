@@ -691,45 +691,38 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         // Before we process the last (n / 2) rounds using the naive algorithm, we need to update
         // the equality polynomial. Let's first update the eq1 cumulative value using the latest challenge.
         let eq_challenge = eq_challenges[prover_state.num_vars / 2 - 1];
-        let one_minus_eq_challenge = EF::one() - eq_challenge;
         let prev_round_challenge = challenge_vector.last().unwrap();
-        let one_minus_prev_round_challenge = EF::one() - *prev_round_challenge;
-        let eq_1_left_and_challenge = mult_ee(&eq_challenge, &prev_round_challenge)
-            + mult_ee(&one_minus_eq_challenge, &one_minus_prev_round_challenge);
+        let eq_times_prev_round_challenge = mult_ee(&eq_challenge, prev_round_challenge);
+        let eq_1_left_and_challenge = eq_times_prev_round_challenge + eq_times_prev_round_challenge
+            - eq_challenge
+            - *prev_round_challenge
+            + EF::one();
         eq_1_left_cumulative = mult_ee(&eq_1_left_cumulative, &eq_1_left_and_challenge);
 
         // Now lets update the eq2 polynomial by multiplying it with the eq1 cumulative value
         let mut eq_2_for_final_rounds = eq_2_evals.clone();
         for i in 0..eq_2_evals.len() {
-            eq_2_for_final_rounds[i] = mult_ee(&eq_1_left_cumulative, &eq_2_for_final_rounds[i]);
+            eq_2_for_final_rounds[i] = eq_1_left_cumulative * eq_2_for_final_rounds[i];
         }
+        let mut eq_state_poly = LinearLagrangeList::from_vector(&eq_2_for_final_rounds);
 
-        // Add this eq2 polynomial to the state polynomials
-        ef_state_polynomials.push(LinearLagrangeList::from_vector(&eq_2_for_final_rounds));
-
-        // Check if all state polynomials have the same size
-        for i in 0..ef_state_polynomials.len() {
-            assert_eq!(
-                ef_state_polynomials[i].list.len(),
-                1 << (prover_state.num_vars - prover_state.num_vars / 2 - 1)
-            );
-        }
-
-        // Process remaining rounds by switching to Algorithm 1
-        for round_num in ((prover_state.num_vars / 2) + 1)..=prover_state.num_vars {
-            let alpha = Self::compute_round_polynomial::<EC, EF>(
-                round_num,
+        // Process all the rounds with only ee multiplications.
+        for round_number in (prover_state.num_vars / 2 + 1)..=prover_state.num_vars {
+            let alpha = Self::compute_round_polynomial_with_eq::<EC, EF>(
+                round_number,
                 &ef_state_polynomials,
+                &eq_state_poly,
                 round_polynomials,
-                num_witness_polys + 1, // TODO: fix this
+                num_witness_polys + 1,
                 &ef_combine_function,
                 transcript,
             );
 
-            // update the state polynomials
-            for j in 0..ef_state_polynomials.len() {
-                ef_state_polynomials[j].fold_in_half(alpha);
-            }
+            // update the state polynomials and eq polynomial in parallel
+            ef_state_polynomials
+                .par_iter_mut()
+                .for_each(|poly| poly.fold_in_half(alpha));
+            eq_state_poly.fold_in_half(alpha);
         }
 
         let elapsed = start.elapsed();
