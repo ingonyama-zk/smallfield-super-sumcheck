@@ -8,6 +8,7 @@ mod fq4_tests {
     use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
     use crate::tower_fields::binius::BiniusTowerField;
+    use crate::tower_fields::binius::OptimizedBiniusTowerField;
     use crate::tower_fields::TowerField;
     use crate::IPForMLSumcheck;
 
@@ -28,8 +29,8 @@ mod fq4_tests {
         BB_COUNT.load(Ordering::SeqCst)
     }
 
-    type BF = BiniusTowerField;
-    type EF = BiniusTowerField;
+    type BF = OptimizedBiniusTowerField;
+    type EF = OptimizedBiniusTowerField;
 
     pub fn create_primitive_functions() -> (
         Box<dyn Fn(&BF) -> EF + Sync>,
@@ -368,25 +369,25 @@ mod fq4_tests {
     fn benchmark_prover_runtime_by_threshold() {
         let nv = 16; // fixed n = 16
         let degree = 2; // fixed d = 2
-        let thresholds = vec![1, 2, 3, 4, 5, 6]; // t = 1, 2, 3, 4, 5, 6
+        let thresholds = vec![1, 2, 3, 4, 5];
         let algorithms = vec![
-            AlgorithmType::NaiveWithEq,    // algo1eq
-            AlgorithmType::ToomCookWithEq, // algo4eq
             AlgorithmType::Naive,          // algo1
             AlgorithmType::ToomCook,       // algo4
+            AlgorithmType::NaiveWithEq,    // algo1eq
+            AlgorithmType::ToomCookWithEq, // algo4eq
         ];
 
         // Table header with increased column width
-        println!("╔═══════════════════════════════════════════════════════════════════════╗");
+        println!("╔══════════════════════════════════════════════════════════════╗");
         println!(
-            "║ Fixed Configurations: n = {}, degree = {}                              ║",
+            "║ Fixed Configurations: n = {}, degree = {}                     ║",
             nv, degree
         );
-        println!("╠═════════════════╦═════════════════════════════════════════════════════╣");
-        println!("║ Algorithm       ║ Runtime (s) by threshold t                          ║");
-        println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╦════════╣");
-        println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║  t=6   ║");
-        println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╬════════╣");
+        println!("╠═════════════════╦════════════════════════════════════════════╣");
+        println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
+        println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
+        println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
+        println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
 
         // For each algorithm
         for algorithm in algorithms {
@@ -402,8 +403,13 @@ mod fq4_tests {
 
             // For each threshold
             for &t in &thresholds {
-                // Reset the counter before each run
-                BB_COUNT.store(0, Ordering::SeqCst);
+                if (algorithm == AlgorithmType::Naive || algorithm == AlgorithmType::NaiveWithEq)
+                    && t > 1
+                {
+                    // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
+                    print!("        ║");
+                    continue;
+                }
 
                 // Run the test and measure time
                 let start = Instant::now();
@@ -426,9 +432,9 @@ mod fq4_tests {
 
             // End the row
             println!();
-            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╬════════╣");
+            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
         }
-        println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╩════════╝");
+        println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
     }
 
     #[rstest]
