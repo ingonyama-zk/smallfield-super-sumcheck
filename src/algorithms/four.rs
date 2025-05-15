@@ -24,6 +24,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         interpolation_maps_bf: &Vec<Box<dyn Fn(&Vec<BF>) -> BF + Send + Sync>>,
         interpolation_maps_ef: &Vec<Box<dyn Fn(&Vec<EF>) -> EF + Send + Sync>>,
         ef_combine_function: &EC,
+        scaled_determinant: &BF,
     ) where
         BE: Fn(&BF, &EF) -> EF + Sync,
         EE: Fn(&EF, &EF) -> EF + Sync,
@@ -214,32 +215,98 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             // Fetch (d + 1)^p witness terms using only bb additions
             // We use given projection mapping indices to know which witness terms to combine from
             // the pre-computed array of size (d + 1)^t
+            // Original precomputed array:       [ p(ε₁, ε₂, ......., εₜ) ] ∀ εᵢ ∈ {0, 1, ..., d - 1, ∞}
+            // Precomputed array for this round: [ p(ε₁, ε₂, ..., εₚ) ]
             let precomputed_array_for_this_round: &Vec<BF> =
                 &precomputed_arrays_for_rounds[round_num];
             assert_eq!(precomputed_array_for_this_round.len(), round_size);
             assert_eq!(challenge_matrix.evaluation_rows.len(), round_num - 1);
 
-            for k in 0..num_evals as u64 {
-                let mut scalar_matrix: MatrixPolynomial<BF> = MatrixPolynomial::<BF> {
-                    no_of_rows: 0,
-                    no_of_columns: num_evals,
-                    evaluation_rows: Vec::with_capacity(1),
-                };
-                let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
-                scalar_matrix.update_with_challenge(
-                    BF::from(k),
-                    &interpolation_maps_bf,
-                    &mult_bb_local,
+            // To compute the round polynomial at given k, we first compute the following witness accumulator:
+            //
+            //     p(ε₁, ε₂, ..., εₚ₋₁, k) := Σₘ Lₘ(k) ∏_i p_i(ε₁, ε₂, ..., εₚ₋₁, m)
+            //
+            // Note that we want to compute evaluations for k = 0, 2, ..., d - 1, ∞ (i.e., d evaluations)
+            // d = 1 ==> evaluation points: 0
+            // d = 2 ==> evaluation points: 0 ∞
+            // d = 3 ==> evaluation points: 0 2 ∞
+            // d = 4 ==> evaluation points: 0 2 3 ∞
+            // We skip k = 1 as it can be computed by the verifier. Also, if d = 1, we only compute for k = 0.
+            // We want to compute the Lagrange evaluations at a given k, i.e., Lₘ(k) ∀m.
+            //
+            // [L₀(k), L₁(k), L₂(k), ..., Lₔ(k)] =  [1, k, k², ..., kᵈ] * ⌈  1  0  0  0  0 ⌉   ⌈   6   0   0   0   0 ⌉
+            //                                                            │ -4  1  0  0  0 │   │  -3   6  -2  -1  12 │
+            //                                                            │  6 -3  1  0  0 │ * │  -6   3   3   0  -6 │
+            //                                                            │ -4  3 -2  1  0 │   │   3  -3  -1   1 -12 │
+            //                                                            ⌊  1 -1  1 -1  1 ⌋   ⌊   0   0   0   0   6 ⌋
+            //                                                            |<-- bin_exp --->|   |<-- interpolation -->|
+            //
+            // The interpolation maps encodes the matrix I' := (binomial_exp * interpolation) in the above equation.
+            // We can avoid a few multiplications for the k = 0 and k = ∞ cases.
+            //
+            // Case k = 0: We have [1, k, k², ..., kᵈ] = [1, 0, 0, ..., 0], thus:
+            // [L₀(0), L₁(0), L₂(0), ..., Lₔ(0)] := [ I'[0][0]  0  0  0  0 ]
+            // and the first entry in the I' matrix is the scaled determinant.
+            //
+            // Case k = ∞: We have [1, k, k², ..., kᵈ] = [0, 0, 0, ..., 1], thus:
+            // [L₀(∞), L₁(∞), L₂(∞), ..., Lₔ(∞)] := [ I'[d][0]  I'[d][1]  ....  I'[d][d] ] (i.e., the last row of I')
+            //
+            // Decompose j as (j_p, j_{p-1}, ...., j_2, j_1)
+            // j_1 is used to compute L_{j_1}(k) so we treat it separately
+            // Rest of the indices are used to fetch respective challenge terms
+            // Thus, we iterate over only (j_2, j_3, ..., j_p) in round p.
+            // This results in a total of (d + 1)ᵖ⁻¹ be multiplications in round p.
+            //
+            for j in 0..(round_size / num_evals) {
+                // Fetch the following term using j from the already-computed array
+                // that contains multiplications of challenge terms.
+                //
+                // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
+                //
+                // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
+                //
+                let local_interpolated_challenge =
+                    interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
+
+                // Process k = 0
+                let local_witness_accumulator_zero =
+                    *scaled_determinant * precomputed_array_for_this_round[j * num_evals];
+                round_polynomials[round_num - 1][0] += mult_be(
+                    &local_witness_accumulator_zero,
+                    &local_interpolated_challenge,
                 );
 
-                //
-                // Decompose j as (j_p, j_{p-1}, ...., j_2, j_1)
-                // j_1 is used to compute L_{j_1}(k) so we treat it separately
-                // Rest of the indices are used to fetch respective challenge terms
-                // Thus, we iterate over only (j_2, j_3, ..., j_p) in round p.
-                // This results in a total of (d + 1)ᵖ⁻¹ be multiplications in round p.
-                //
-                for j in 0..(round_size / num_evals) {
+                if r_degree > 1 {
+                    // Process k = ∞ only if degree > 1
+                    let local_witness_accumulator_infty = interpolation_maps_bf.last().unwrap()(
+                        &precomputed_array_for_this_round[j * num_evals..].to_vec(),
+                    );
+                    round_polynomials[round_num - 1][r_degree - 1] += mult_be(
+                        &local_witness_accumulator_infty,
+                        &local_interpolated_challenge,
+                    );
+                }
+
+                // Process k = 2, 3, ..., d - 1 (total d - 2 evaluations)
+                for k in 2..r_degree {
+                    // Compute scalar matrix for (k + 1)
+                    let mut scalar_matrix: MatrixPolynomial<BF> = MatrixPolynomial::<BF> {
+                        no_of_rows: 0,
+                        no_of_columns: num_evals,
+                        evaluation_rows: Vec::with_capacity(1),
+                    };
+                    let mult_bb_local = |a: &BF, b: &BF| -> BF { (*a) * (*b) };
+
+                    // We make a minor assumption here. We assume that k is a 4-bit number, i.e. k ∈ {0, 1, ..., 15}
+                    // since it's reasonable to assume num_evals would be always less than 16.
+                    // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
+                    // and we want these terms to be as "small" as possible.
+                    scalar_matrix.update_with_challenge(
+                        BF::new(k as u128, Some(2)),
+                        &interpolation_maps_bf,
+                        &mult_bb_local,
+                    );
+
                     // Extract j_1 to process the scalar separately
                     let mut local_witness_accumulator = BF::zero();
                     for j_1 in 0..num_evals {
@@ -247,22 +314,13 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                             * precomputed_array_for_this_round[j * num_evals + j_1];
                     }
 
-                    // Fetch the following term using j from the already-computed array
-                    // that contains multiplications of challenge terms.
-                    //
-                    // Lⱼ₂(αₚ₋₁) * Lⱼ₃(αₚ₋₂) * ... * Lⱼₚ(α₁)
-                    //
-                    // where j ≡ (jₚ || jₚ₋₁ || ... || j₂).
-                    //
-                    let local_interpolated_challenge =
-                        interpolated_challenge_matrix_polynomial.evaluation_rows[j][0];
-
                     // Accumulate round polynomial evaluation at k
-                    round_polynomials[round_num - 1][k as usize] +=
+                    round_polynomials[round_num - 1][k as usize - 1] +=
                         mult_be(&local_witness_accumulator, &local_interpolated_challenge);
                 }
             }
 
+            // Now we've got: s(0) s(2) s(3) ... s(d - 1) s(∞) and the prover sends these d evaluations
             // append the round polynomial (i.e. prover message) to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,

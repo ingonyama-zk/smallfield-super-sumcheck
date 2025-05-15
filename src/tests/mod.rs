@@ -158,13 +158,10 @@ pub mod test_helpers {
         let num_evals = degree + 1;
         let mut eval_matrix: Vec<Vec<i64>> = Vec::with_capacity(num_evals);
 
-        // Push first two rows for x = 0 and x = ∞
+        // Push first row for x = 0
         // x = 0 => [1 0 0 ... 0]
-        // x = ∞ => [0 0 0 ... 1]
         eval_matrix.push(vec![0; num_evals]);
         eval_matrix[0][0] = 1;
-        eval_matrix.push(vec![0; num_evals]);
-        eval_matrix[1][num_evals - 1] = 1;
 
         for i in 1..=(num_evals / 2) {
             // Push a row for x = i
@@ -182,6 +179,11 @@ pub mod test_helpers {
                 eval_matrix.push(eval_row);
             }
         }
+
+        // Push last row for x = ∞
+        // x = ∞ => [0 0 0 ... 1]
+        eval_matrix.push(vec![BF::zero(); num_evals]);
+        eval_matrix[num_evals - 1][num_evals - 1] = BF::one();
         eval_matrix
     }
 

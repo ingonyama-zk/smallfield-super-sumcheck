@@ -32,49 +32,55 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         let state_polynomial_len = state_polynomials[0].list.len();
 
-        // Compute the evaluations s_i(1), ..., s_i(d - 1), and s_i(∞)
-        let summed_contributions_and_s_inf = (0..state_polynomial_len)
+        // Compute the evaluations s_i(0), s_i(2), ..., s_i(d - 1), and s_i(∞)
+        // d = 1 ==> evaluation points: 0
+        // d = 2 ==> evaluation points: 0 ∞
+        // d = 3 ==> evaluation points: 0 2 ∞
+        // d = 4 ==> evaluation points: 0 2 3 ∞
+        let prover_message = (0..state_polynomial_len)
             .into_par_iter()
             .map(|i| {
-                let mut contributions = vec![EF::zero(); round_polynomial_degree - 1];
+                let mut contributions = vec![EF::zero(); round_polynomial_degree];
+                let mut evals_at_0: Vec<F> = Vec::with_capacity(round_polynomial_degree);
                 let mut evals_at_1: Vec<F> = Vec::with_capacity(round_polynomial_degree);
                 let mut evals_at_infty: Vec<F> = Vec::with_capacity(round_polynomial_degree);
 
                 for k in 0..round_polynomial_degree {
                     let even_val = state_polynomials[k].list[i].even;
                     let odd_val = state_polynomials[k].list[i].odd;
+                    evals_at_0.push(even_val);
                     evals_at_1.push(odd_val);
                     evals_at_infty.push(odd_val - even_val);
                 }
 
-                let evaluation_at_infinity = combine_function(&evals_at_infty);
+                // Combine for k = 0
+                contributions[0] = combine_function(&evals_at_0);
 
+                // Combine for k = ∞ only if d > 1
+                if round_polynomial_degree > 1 {
+                    contributions[round_polynomial_degree - 1] = combine_function(&evals_at_infty);
+                }
+
+                // Combine for k = 2, 3, ..., d - 1
                 let mut current_evals = evals_at_1;
-                for u in 1..round_polynomial_degree {
-                    contributions[u - 1] = combine_function(&current_evals);
+                for u in 2..round_polynomial_degree {
                     for k in 0..round_polynomial_degree {
                         // `evals_at_(u) = evals_at_(u-1) + evals_at_infty`
                         current_evals[k] += evals_at_infty[k];
                     }
+                    contributions[u - 1] = combine_function(&current_evals);
                 }
-                (contributions, evaluation_at_infinity)
+                contributions
             })
             .reduce(
-                || (vec![EF::zero(); round_polynomial_degree - 1], EF::zero()), // Inlined identity
+                || (vec![EF::zero(); round_polynomial_degree]), // Inlined identity
                 |mut acc, item| {
                     for idx in 0..round_polynomial_degree - 1 {
-                        acc.0[idx] += item.0[idx];
+                        acc[idx] += item[idx];
                     }
-                    acc.1 += item.1;
                     acc
                 },
             );
-
-        let (summed_contributions, summed_s_inf) = summed_contributions_and_s_inf;
-
-        let mut prover_message = Vec::with_capacity(round_polynomial_degree);
-        prover_message.push(summed_s_inf);
-        prover_message.extend_from_slice(&summed_contributions);
 
         round_polynomials[round_number - 1] = prover_message;
 

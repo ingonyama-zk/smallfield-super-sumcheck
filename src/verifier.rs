@@ -70,22 +70,13 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
         let mut expected_sum = claimed_sum;
         for round_index in 0..proof.num_vars {
-            // Received evaluations are s_i(inf), s_i(1)...s_i(d-1)
+            // Received evaluations are s_i(0), s_i(2), ..., s_i(d-1), s_i(inf)
             let received_evaluations: &Vec<EF> = &proof.round_polynomials[round_index];
+
             // Expect d = proof.degree evaluations
             if received_evaluations.len() != proof.degree {
                 return Err(SumcheckError::InvalidRoundPolynomial);
             }
-
-            // Extract s_i(inf) and s_i(1)...s_i(d-1)
-            // Assume degree >= 1 based on user request
-            if received_evaluations.len() < 2 {
-                // Need at least s_i(inf), s_i(1) for d >= 1
-                // This implicitly catches degree 0 or 1 with insufficient data
-                return Err(SumcheckError::InvalidRoundPolynomial);
-            }
-            let round_poly_evaluation_at_inf = received_evaluations[0];
-            let round_poly_evaluation_at_1 = received_evaluations[1]; // s_i(1)
 
             // Check rᵢ(αᵢ) == rᵢ₊₁(0) + rᵢ₊₁(1)
             //
@@ -123,20 +114,31 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                 None => expected_sum,
             };
 
-            // Derive s_i(0) using the expected sum: s_i(0) = modified_expected_sum - s_i(1)
-            let derived_round_poly_evaluation_at_0 =
-                modified_expected_sum - round_poly_evaluation_at_1;
+            // Derive s_i(1) using the expected sum: s_i(1) = modified_expected_sum - s_i(0)
+            let derived_round_poly_evaluation_at_1 =
+                modified_expected_sum - received_evaluations[0];
+
+            // Extract s_i(inf)
+            let mut round_poly_evaluation_at_inf = EF::zero();
+            if proof.degree > 1 {
+                round_poly_evaluation_at_inf = received_evaluations[proof.degree - 1];
+            }
 
             // Reconstruct the evaluations vector [s_i(0), s_i(1), ..., s_i(d-1)] needed for interpolation
-            let mut evaluations_for_interpolation = Vec::with_capacity(proof.degree);
-            evaluations_for_interpolation.push(derived_round_poly_evaluation_at_0);
-            evaluations_for_interpolation.extend_from_slice(&received_evaluations[1..]); // Add s_i(1) .. s_i(d-1)
+            let mut evaluations_for_interpolation = received_evaluations.clone();
+            evaluations_for_interpolation.insert(1, derived_round_poly_evaluation_at_1); // Insert s_i(1)
+            evaluations_for_interpolation.remove(proof.degree - 1); // Remove s_i(inf)
+            debug_assert_eq!(
+                evaluations_for_interpolation.len(),
+                proof.degree,
+                "Evaluations for interpolation should be of length d"
+            );
 
             // append the *prover's actual message* to the transcript
             <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
                 transcript,
                 b"r_poly",
-                received_evaluations, // Use the received evaluations [s(inf), s(1)..s(d-1)]
+                received_evaluations, // Use the received evaluations [s(0), s_i(2), ..., s(d-1), s(inf)]
             );
 
             // derive the verifier's challenge for the next round
@@ -147,7 +149,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
             // Compute r_{i}(α_i) using the interpolation formula with infinity
             expected_sum = barycentric_interpolation_with_infinity(
-                &evaluations_for_interpolation, // s(0)..s(d-1)
+                &evaluations_for_interpolation, // s(0)...s(d-1)
                 round_poly_evaluation_at_inf,   // s(inf)
                 alpha,
             );
