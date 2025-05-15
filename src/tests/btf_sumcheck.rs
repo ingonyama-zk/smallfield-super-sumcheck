@@ -18,9 +18,9 @@ mod fq4_tests {
     use num::One;
     use rstest::rstest;
 
-    use chrono::Local;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
+    use sysinfo::System;
 
     // Define a global atomic counter
     static BB_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -93,13 +93,26 @@ mod fq4_tests {
         )
     }
 
+    /// Returns current resident set size in MB (macOS and Linux, but not peak)
+    fn get_current_rss_mb() -> f64 {
+        let mut sys = System::new();
+        sys.refresh_process(sysinfo::get_current_pid().unwrap());
+        let pid = sysinfo::get_current_pid().unwrap();
+        if let Some(proc) = sys.process(pid) {
+            // memory() returns bytes
+            proc.memory() as f64 / 1024.0 / 1024.0
+        } else {
+            0.0
+        }
+    }
+
     pub fn sumcheck_test_helper(
         nv: usize,
         degree: usize,
         round_t: usize,
         algorithm: AlgorithmType,
         num_levels: usize,
-    ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>) {
+    ) -> (SumcheckProof<EF>, Result<bool, SumcheckError>, f64, f64) {
         let (to_ef, combine_ef, combine_bf, mult_be, mult_ee, mult_bb, add_ee) =
             create_primitive_functions();
         let (mut prover_state, claimed_sum, eq_challenges): (
@@ -123,6 +136,8 @@ mod fq4_tests {
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
+        let _ = get_current_rss_mb();
+        let start = Instant::now();
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_ef,
@@ -141,8 +156,9 @@ mod fq4_tests {
             Some(scaled_det),
             Some(claimed_sum),
         );
-
-        // println!("mult_bb was called {} times", get_bb_count());
+        let elapsed = start.elapsed();
+        let time_s = elapsed.as_secs_f64();
+        let mem_mb = get_current_rss_mb();
 
         let mut round_t_v = round_t;
         if !(algorithm == AlgorithmType::ToomCook || algorithm == AlgorithmType::ToomCookWithEq) {
@@ -159,7 +175,7 @@ mod fq4_tests {
             Some(scaled_det),
             Some(round_t_v),
         );
-        (proof, result)
+        (proof, result, time_s, mem_mb)
     }
 
     #[test]
@@ -366,82 +382,171 @@ mod fq4_tests {
         );
     }
 
+    /// Prints a table of runtimes and memory for all four algorithms for given nv, degree, round_t
+    pub fn helper_benchmark_prover(nv: usize, degree: usize) {
+        let algorithms = vec![
+            AlgorithmType::Naive,          // Algo1
+            AlgorithmType::ToomCook,       // Algo4
+            AlgorithmType::NaiveWithEq,    // Algo1Eq
+            AlgorithmType::ToomCookWithEq, // Algo4Eq
+        ];
+        let algo_names = vec!["Algo1", "Algo4", "Algo1Eq", "Algo4Eq"];
+
+        debug_assert!(degree == 2 || degree == 3);
+
+        println!("╔═══════════════════════════════════════════════════════════╗");
+        println!(
+            "║ Fixed Configurations: n = {}, degree = {},                 ║",
+            nv, degree
+        );
+        println!("╠═════════════════╦════════════════════╦════════════════════╣");
+        println!("║ Algorithm       ║ Runtime (s)        ║ Mem (MB)           ║");
+        println!("╠═════════════════╬════════════════════╬════════════════════╣");
+
+        for (algo, name) in algorithms.iter().zip(algo_names.iter()) {
+            // Choose round_t based on empirical results
+            let mut _round_t = 1;
+            if degree == 2 && *algo == AlgorithmType::ToomCook {
+                _round_t = 4;
+            } else if degree == 2 && *algo == AlgorithmType::ToomCookWithEq {
+                _round_t = 3;
+            } else if degree == 3 && *algo == AlgorithmType::ToomCook {
+                _round_t = 3;
+            } else if degree == 3 && *algo == AlgorithmType::ToomCookWithEq {
+                _round_t = 2;
+            }
+
+            let (_, result, time_s, mem_mb) =
+                sumcheck_test_helper(nv, degree, _round_t, algo.clone(), 1);
+
+            // Verify the result is correct
+            assert_eq!(
+                result.unwrap(),
+                true,
+                "Verification failed for algorithm {:?} with t={}",
+                algo,
+                _round_t
+            );
+
+            let mut algo_print_name = name.to_string();
+            if *algo == AlgorithmType::ToomCook || *algo == AlgorithmType::ToomCookWithEq {
+                algo_print_name = format!("{} (t={})", name, _round_t);
+            }
+
+            println!(
+                "║ {:<15} ║ {:>10.2} s       ║ {:>10.0} MB      ║",
+                algo_print_name, time_s, mem_mb
+            );
+            println!("╠═════════════════╬════════════════════╬════════════════════╣");
+        }
+        println!("╚═════════════════╩════════════════════╩════════════════════╝");
+    }
+
     #[test]
-    fn benchmark_prover_to_get_optimal_round_t() {
-        for (nv, degree) in vec![(16, 2), (18, 2), (20, 2), (22, 2), (24, 2)] {
-            let thresholds = vec![1, 2, 3, 4, 5];
-            let algorithms = vec![
-                AlgorithmType::Naive,          // algo1
-                AlgorithmType::ToomCook,       // algo4
-                AlgorithmType::NaiveWithEq,    // algo1eq
-                AlgorithmType::ToomCookWithEq, // algo4eq
-            ];
+    fn benchmark_prover_n16_d2() {
+        helper_benchmark_prover(16, 2);
+    }
 
-            println!(
-                "\nTest started at: {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S")
-            );
+    fn helper_benchmark_optimal_round_t(nv: usize, degree: usize) {
+        let thresholds = vec![1, 2, 3, 4, 5];
+        let algorithms = vec![
+            AlgorithmType::Naive,          // algo1
+            AlgorithmType::ToomCook,       // algo4
+            AlgorithmType::NaiveWithEq,    // algo1eq
+            AlgorithmType::ToomCookWithEq, // algo4eq
+        ];
 
-            // Table header with increased column width
-            println!("╔══════════════════════════════════════════════════════════════╗");
-            println!(
-                "║ Fixed Configurations: n = {}, degree = {}                     ║",
-                nv, degree
-            );
-            println!("╠═════════════════╦════════════════════════════════════════════╣");
-            println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
-            println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
-            println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
-            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+        // Table header with increased column width
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!(
+            "║ Fixed Configurations: n = {}, degree = {}                     ║",
+            nv, degree
+        );
+        println!("╠═════════════════╦════════════════════════════════════════════╣");
+        println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
+        println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
+        println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
+        println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
 
-            // For each algorithm
-            for algorithm in algorithms {
-                let algo_name = match algorithm {
-                    AlgorithmType::NaiveWithEq => "Algo1Eq",
-                    AlgorithmType::ToomCookWithEq => "Algo4Eq",
-                    AlgorithmType::Naive => "Algo1",
-                    AlgorithmType::ToomCook => "Algo4",
-                    _ => "Unknown",
-                };
+        // For each algorithm
+        for algorithm in algorithms {
+            let algo_name = match algorithm {
+                AlgorithmType::NaiveWithEq => "Algo1Eq",
+                AlgorithmType::ToomCookWithEq => "Algo4Eq",
+                AlgorithmType::Naive => "Algo1",
+                AlgorithmType::ToomCook => "Algo4",
+                _ => "Unknown",
+            };
 
-                print!("║ {:<15} ║", algo_name);
+            print!("║ {:<15} ║", algo_name);
 
-                // For each threshold
-                for &t in &thresholds {
-                    let skip_condition_1 = (algorithm == AlgorithmType::Naive
-                        || algorithm == AlgorithmType::NaiveWithEq)
-                        && t > 1;
-                    if skip_condition_1 {
-                        // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
-                        print!("        ║");
-                        continue;
-                    }
-
-                    // Run the test and measure time
-                    let start = Instant::now();
-                    let result = sumcheck_test_helper(nv, degree, t, algorithm.clone(), 1);
-                    let elapsed = start.elapsed();
-                    let time_s = elapsed.as_secs_f64(); // Convert to seconds
-
-                    // Verify the result is correct
-                    assert_eq!(
-                        result.1.unwrap(),
-                        true,
-                        "Verification failed for algorithm {:?} with t={}",
-                        algorithm,
-                        t
-                    );
-
-                    // Print runtime in seconds with 2 decimal places
-                    print!(" {:>6.2} ║", time_s);
+            // For each threshold
+            for &t in &thresholds {
+                let skip_condition_1 = (algorithm == AlgorithmType::Naive
+                    || algorithm == AlgorithmType::NaiveWithEq)
+                    && t > 1;
+                if skip_condition_1 {
+                    // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
+                    print!("        ║");
+                    continue;
                 }
 
-                // End the row
-                println!();
-                println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+                // Run the test and measure time
+                let (_, result, time_s, _) =
+                    sumcheck_test_helper(nv, degree, t, algorithm.clone(), 1);
+
+                // Verify the result is correct
+                assert_eq!(
+                    result.unwrap(),
+                    true,
+                    "Verification failed for algorithm {:?} with t={}",
+                    algorithm,
+                    t
+                );
+
+                // Print runtime in seconds with 2 decimal places
+                print!(" {:>6.2} ║", time_s);
             }
-            println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
+
+            // End the row
+            println!();
+            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
         }
+        println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
+    }
+
+    #[test]
+    fn benchmark_optimal_round_t_n16_d2() {
+        helper_benchmark_optimal_round_t(16, 2);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n18_d2() {
+        helper_benchmark_optimal_round_t(18, 2);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n20_d2() {
+        helper_benchmark_optimal_round_t(20, 2);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n22_d2() {
+        helper_benchmark_optimal_round_t(22, 2);
+    }
+
+    #[test]
+    fn benchmark_optimal_round_t_n16_d3() {
+        helper_benchmark_optimal_round_t(16, 3);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n18_d3() {
+        helper_benchmark_optimal_round_t(18, 3);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n20_d3() {
+        helper_benchmark_optimal_round_t(20, 3);
+    }
+    #[test]
+    fn benchmark_optimal_round_t_n22_d3() {
+        helper_benchmark_optimal_round_t(22, 3);
     }
 
     #[rstest]
@@ -498,18 +603,18 @@ mod fq4_tests {
         #[values(1, 3, 4)] degree: usize,
         #[values(1, nv / 2)] round_t: usize,
     ) {
-        let (proof_1, result_1) =
+        let (proof_1, result_1, _, _) =
             sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Naive, 1);
-        let (proof_2, result_2) = sumcheck_test_helper(
+        let (proof_2, result_2, _, _) = sumcheck_test_helper(
             nv,
             degree,
             round_t,
             AlgorithmType::WitnessChallengeSeparation,
             1,
         );
-        let (proof_3, result_3) =
+        let (proof_3, result_3, _, _) =
             sumcheck_test_helper(nv, degree, round_t, AlgorithmType::Precomputation, 1);
-        let (proof_4, result_4) =
+        let (proof_4, result_4, _, _) =
             sumcheck_test_helper(nv, degree, round_t, AlgorithmType::ToomCook, 1);
 
         assert_eq!(result_1.unwrap(), true);
