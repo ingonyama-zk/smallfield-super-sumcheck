@@ -442,9 +442,64 @@ mod fq4_tests {
         println!("╚═════════════════╩════════════════════╩════════════════════╝");
     }
 
+    // Degree 2 tests
     #[test]
     fn benchmark_prover_n16_d2() {
         helper_benchmark_prover(16, 2);
+    }
+    #[test]
+    fn benchmark_prover_n18_d2() {
+        helper_benchmark_prover(18, 2);
+    }
+    #[test]
+    fn benchmark_prover_n20_d2() {
+        helper_benchmark_prover(20, 2);
+    }
+    #[test]
+    fn benchmark_prover_n22_d2() {
+        helper_benchmark_prover(22, 2);
+    }
+    #[test]
+    fn benchmark_prover_n24_d2() {
+        helper_benchmark_prover(24, 2);
+    }
+    #[test]
+    fn benchmark_prover_n26_d2() {
+        helper_benchmark_prover(26, 2);
+    }
+    #[test]
+    fn benchmark_prover_n28_d2() {
+        helper_benchmark_prover(28, 2);
+    }
+
+    // Degree 3 tests
+    #[test]
+    fn benchmark_prover_n16_d3() {
+        helper_benchmark_prover(16, 3);
+    }
+    #[test]
+    fn benchmark_prover_n18_d3() {
+        helper_benchmark_prover(18, 3);
+    }
+    #[test]
+    fn benchmark_prover_n20_d3() {
+        helper_benchmark_prover(20, 3);
+    }
+    #[test]
+    fn benchmark_prover_n22_d3() {
+        helper_benchmark_prover(22, 3);
+    }
+    #[test]
+    fn benchmark_prover_n24_d3() {
+        helper_benchmark_prover(24, 3);
+    }
+    #[test]
+    fn benchmark_prover_n26_d3() {
+        helper_benchmark_prover(26, 3);
+    }
+    #[test]
+    fn benchmark_prover_n28_d3() {
+        helper_benchmark_prover(28, 3);
     }
 
     fn helper_benchmark_optimal_round_t(nv: usize, degree: usize) {
