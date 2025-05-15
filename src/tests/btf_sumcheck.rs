@@ -18,6 +18,7 @@ mod fq4_tests {
     use num::One;
     use rstest::rstest;
 
+    use chrono::Local;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
 
@@ -366,75 +367,81 @@ mod fq4_tests {
     }
 
     #[test]
-    fn benchmark_prover_runtime_by_threshold() {
-        let nv = 16; // fixed n = 16
-        let degree = 2; // fixed d = 2
-        let thresholds = vec![1, 2, 3, 4, 5];
-        let algorithms = vec![
-            AlgorithmType::Naive,          // algo1
-            AlgorithmType::ToomCook,       // algo4
-            AlgorithmType::NaiveWithEq,    // algo1eq
-            AlgorithmType::ToomCookWithEq, // algo4eq
-        ];
+    fn benchmark_prover_to_get_optimal_round_t() {
+        for (nv, degree) in vec![(16, 2), (18, 2), (20, 2), (22, 2), (24, 2)] {
+            let thresholds = vec![1, 2, 3, 4, 5];
+            let algorithms = vec![
+                AlgorithmType::Naive,          // algo1
+                AlgorithmType::ToomCook,       // algo4
+                AlgorithmType::NaiveWithEq,    // algo1eq
+                AlgorithmType::ToomCookWithEq, // algo4eq
+            ];
 
-        // Table header with increased column width
-        println!("╔══════════════════════════════════════════════════════════════╗");
-        println!(
-            "║ Fixed Configurations: n = {}, degree = {}                     ║",
-            nv, degree
-        );
-        println!("╠═════════════════╦════════════════════════════════════════════╣");
-        println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
-        println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
-        println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
-        println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+            println!(
+                "\nTest started at: {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S")
+            );
 
-        // For each algorithm
-        for algorithm in algorithms {
-            let algo_name = match algorithm {
-                AlgorithmType::NaiveWithEq => "Algo1Eq",
-                AlgorithmType::ToomCookWithEq => "Algo4Eq",
-                AlgorithmType::Naive => "Algo1",
-                AlgorithmType::ToomCook => "Algo4",
-                _ => "Unknown",
-            };
+            // Table header with increased column width
+            println!("╔══════════════════════════════════════════════════════════════╗");
+            println!(
+                "║ Fixed Configurations: n = {}, degree = {}                     ║",
+                nv, degree
+            );
+            println!("╠═════════════════╦════════════════════════════════════════════╣");
+            println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
+            println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
+            println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
+            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
 
-            print!("║ {:<15} ║", algo_name);
+            // For each algorithm
+            for algorithm in algorithms {
+                let algo_name = match algorithm {
+                    AlgorithmType::NaiveWithEq => "Algo1Eq",
+                    AlgorithmType::ToomCookWithEq => "Algo4Eq",
+                    AlgorithmType::Naive => "Algo1",
+                    AlgorithmType::ToomCook => "Algo4",
+                    _ => "Unknown",
+                };
 
-            // For each threshold
-            for &t in &thresholds {
-                if (algorithm == AlgorithmType::Naive || algorithm == AlgorithmType::NaiveWithEq)
-                    && t > 1
-                {
-                    // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
-                    print!("        ║");
-                    continue;
+                print!("║ {:<15} ║", algo_name);
+
+                // For each threshold
+                for &t in &thresholds {
+                    let skip_condition_1 = (algorithm == AlgorithmType::Naive
+                        || algorithm == AlgorithmType::NaiveWithEq)
+                        && t > 1;
+                    if skip_condition_1 {
+                        // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
+                        print!("        ║");
+                        continue;
+                    }
+
+                    // Run the test and measure time
+                    let start = Instant::now();
+                    let result = sumcheck_test_helper(nv, degree, t, algorithm.clone(), 1);
+                    let elapsed = start.elapsed();
+                    let time_s = elapsed.as_secs_f64(); // Convert to seconds
+
+                    // Verify the result is correct
+                    assert_eq!(
+                        result.1.unwrap(),
+                        true,
+                        "Verification failed for algorithm {:?} with t={}",
+                        algorithm,
+                        t
+                    );
+
+                    // Print runtime in seconds with 2 decimal places
+                    print!(" {:>6.2} ║", time_s);
                 }
 
-                // Run the test and measure time
-                let start = Instant::now();
-                let result = sumcheck_test_helper(nv, degree, t, algorithm.clone(), 1);
-                let elapsed = start.elapsed();
-                let time_s = elapsed.as_secs_f64(); // Convert to seconds
-
-                // Verify the result is correct
-                assert_eq!(
-                    result.1.unwrap(),
-                    true,
-                    "Verification failed for algorithm {:?} with t={}",
-                    algorithm,
-                    t
-                );
-
-                // Print runtime in seconds with 2 decimal places
-                print!(" {:>6.2} ║", time_s);
+                // End the row
+                println!();
+                println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
             }
-
-            // End the row
-            println!();
-            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+            println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
         }
-        println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
     }
 
     #[rstest]
