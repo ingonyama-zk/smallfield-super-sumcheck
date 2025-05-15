@@ -120,6 +120,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
         projection_mapping_indices: Option<&Vec<usize>>,
         interpolation_maps_bf: Option<&Vec<Box<dyn Fn(&Vec<BF>) -> BF>>>,
         interpolation_maps_ef: Option<&Vec<Box<dyn Fn(&Vec<EF>) -> EF>>>,
+        scaled_determinant: Option<BF>,
+        claimed_sum: Option<EF>,
     ) -> SumcheckProof<EF>
     where
         BC: Fn(&Vec<BF>) -> EF + Sync,
@@ -137,6 +139,8 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
             prover_state.num_vars as u64,
             degree as u64,
         );
+
+        let is_eq = prover_state.eq_challenges.is_some();
 
         // Declare r_polys and initialise it with 0s
         // TODO: check with Justin/Quang if this is fiat-shamir-safe as we aren't including r(0)/claimed sum in fiat shamir.
@@ -208,12 +212,14 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                 interpolation_maps_bf.unwrap(),
                 interpolation_maps_ef.unwrap(),
                 ef_combine_function,
+                &scaled_determinant.unwrap(),
             ),
             AlgorithmType::NaiveWithEq => Self::prove_with_eq_naive_algorithm::<EC, BC, T>(
                 prover_state,
                 &ef_combine_function,
                 transcript,
                 &mut r_polys,
+                claimed_sum.unwrap(),
                 to_ef,
             ),
             AlgorithmType::WitnessChallengeSeparationWithEq => {
@@ -253,13 +259,15 @@ impl<EF: TowerField, BF: TowerField> IPForMLSumcheck<EF, BF> {
                     interpolation_maps_bf.unwrap(),
                     interpolation_maps_ef.unwrap(),
                     ef_combine_function,
+                    &scaled_determinant.unwrap(),
+                    claimed_sum.unwrap(),
                 )
             }
         }
 
         SumcheckProof {
             num_vars: prover_state.num_vars,
-            degree,
+            degree: degree + is_eq as usize,
             round_polynomials: r_polys,
         }
     }

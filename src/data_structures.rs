@@ -1047,14 +1047,24 @@ where
         assert_eq!(self.no_of_rows, multiplicand.no_of_rows);
         assert_eq!(multiplicand.no_of_columns, 1);
 
+        // Parallelize the column processing
         // ATTENTION: We are not counting ee additions here!
         let scaled_vec: Vec<OtherF> = (0..self.no_of_columns)
+            .into_par_iter() // Use parallel iterator
             .map(|col_index| {
+                // Create a mutable buffer for e_row values to avoid repeated lookup
+                let e_values: Vec<OtherF> = multiplicand
+                    .evaluation_rows
+                    .iter()
+                    .map(|e_row| e_row[0])
+                    .collect();
+
+                // Process each row for this column in a more cache-friendly manner
                 self.evaluation_rows
                     .iter()
-                    .zip(multiplicand.evaluation_rows.iter())
-                    .fold(OtherF::zero(), |acc, (b_row, e_row)| {
-                        acc + mult_be(&b_row[col_index], &e_row[0])
+                    .zip(e_values.iter())
+                    .fold(OtherF::zero(), |acc, (b_row, e_val)| {
+                        acc + mult_be(&b_row[col_index], e_val)
                     })
             })
             .collect();

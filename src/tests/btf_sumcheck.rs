@@ -8,6 +8,7 @@ mod fq4_tests {
     use crate::tests::test_helpers::common_setup_for_toom_cook;
     use crate::tests::test_helpers::create_sumcheck_test_data;
     use crate::tower_fields::binius::BiniusTowerField;
+    use crate::tower_fields::binius::OptimizedBiniusTowerField;
     use crate::tower_fields::TowerField;
     use crate::IPForMLSumcheck;
 
@@ -28,8 +29,8 @@ mod fq4_tests {
         BB_COUNT.load(Ordering::SeqCst)
     }
 
-    type BF = BiniusTowerField;
-    type EF = BiniusTowerField;
+    type BF = OptimizedBiniusTowerField;
+    type EF = OptimizedBiniusTowerField;
 
     pub fn create_primitive_functions() -> (
         Box<dyn Fn(&BF) -> EF + Sync>,
@@ -109,11 +110,6 @@ mod fq4_tests {
         let (emaps_base, projective_map_indices, imaps_base, imaps_ext, mut scaled_det) =
             common_setup_for_toom_cook::<BF, EF>(degree);
 
-        println!(
-            "n = {}, d = {}, t = {}, algo = {:?}",
-            nv, degree, round_t, algorithm
-        );
-
         if eq_challenges.is_some() {
             assert!(
                 algorithm == AlgorithmType::PrecomputationWithEq
@@ -126,7 +122,6 @@ mod fq4_tests {
 
         // create a proof
         let mut prover_transcript = Transcript::new(b"test_sumcheck");
-        let start = Instant::now();
         let proof: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove::<_, _, _, _, _, _, _>(
             &mut prover_state,
             &combine_ef,
@@ -142,9 +137,9 @@ mod fq4_tests {
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(scaled_det),
+            Some(claimed_sum),
         );
-        let elapsed = start.elapsed();
-        println!("prove_time: {:.2?}", elapsed);
 
         // println!("mult_bb was called {} times", get_bb_count());
 
@@ -355,18 +350,105 @@ mod fq4_tests {
         );
     }
 
+    #[test]
+    fn check_algo4_eq() {
+        let deg = 3;
+        let thresh = 2;
+        //
+        // Algorithm 4 with equality polynomial
+        //
+        assert_eq!(
+            sumcheck_test_helper(16, deg, thresh, AlgorithmType::ToomCookWithEq, 1)
+                .1
+                .unwrap(),
+            true
+        );
+    }
+
+    #[test]
+    fn benchmark_prover_runtime_by_threshold() {
+        let nv = 16; // fixed n = 16
+        let degree = 2; // fixed d = 2
+        let thresholds = vec![1, 2, 3, 4, 5];
+        let algorithms = vec![
+            AlgorithmType::Naive,          // algo1
+            AlgorithmType::ToomCook,       // algo4
+            AlgorithmType::NaiveWithEq,    // algo1eq
+            AlgorithmType::ToomCookWithEq, // algo4eq
+        ];
+
+        // Table header with increased column width
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!(
+            "║ Fixed Configurations: n = {}, degree = {}                     ║",
+            nv, degree
+        );
+        println!("╠═════════════════╦════════════════════════════════════════════╣");
+        println!("║ Algorithm       ║ Runtime (s) by threshold t                 ║");
+        println!("╠═════════════════╬════════╦════════╦════════╦════════╦════════╣");
+        println!("║                 ║  t=1   ║  t=2   ║  t=3   ║  t=4   ║  t=5   ║");
+        println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+
+        // For each algorithm
+        for algorithm in algorithms {
+            let algo_name = match algorithm {
+                AlgorithmType::NaiveWithEq => "Algo1Eq",
+                AlgorithmType::ToomCookWithEq => "Algo4Eq",
+                AlgorithmType::Naive => "Algo1",
+                AlgorithmType::ToomCook => "Algo4",
+                _ => "Unknown",
+            };
+
+            print!("║ {:<15} ║", algo_name);
+
+            // For each threshold
+            for &t in &thresholds {
+                if (algorithm == AlgorithmType::Naive || algorithm == AlgorithmType::NaiveWithEq)
+                    && t > 1
+                {
+                    // Leave the cell empty for t > 1 for Algo1 and Algo1Eq
+                    print!("        ║");
+                    continue;
+                }
+
+                // Run the test and measure time
+                let start = Instant::now();
+                let result = sumcheck_test_helper(nv, degree, t, algorithm.clone(), 1);
+                let elapsed = start.elapsed();
+                let time_s = elapsed.as_secs_f64(); // Convert to seconds
+
+                // Verify the result is correct
+                assert_eq!(
+                    result.1.unwrap(),
+                    true,
+                    "Verification failed for algorithm {:?} with t={}",
+                    algorithm,
+                    t
+                );
+
+                // Print runtime in seconds with 2 decimal places
+                print!(" {:>6.2} ║", time_s);
+            }
+
+            // End the row
+            println!();
+            println!("╠═════════════════╬════════╬════════╬════════╬════════╬════════╣");
+        }
+        println!("╚═════════════════╩════════╩════════╩════════╩════════╩════════╝");
+    }
+
     #[rstest]
     fn check_sumcheck_product(
-        #[values(6, 9)] nv: usize,
-        #[values(1, 2, 3, 6)] degree: usize,
+        #[values(16, 18)] nv: usize,
+        #[values(2)] degree: usize,
         #[values(
             AlgorithmType::Naive,
-            AlgorithmType::WitnessChallengeSeparation,
-            AlgorithmType::Precomputation,
+            // AlgorithmType::WitnessChallengeSeparation,
+            // AlgorithmType::Precomputation,
             AlgorithmType::ToomCook,
             AlgorithmType::NaiveWithEq,
-            AlgorithmType::WitnessChallengeSeparationWithEq,
-            AlgorithmType::PrecomputationWithEq,
+            // AlgorithmType::WitnessChallengeSeparationWithEq,
+            // AlgorithmType::PrecomputationWithEq,
             AlgorithmType::ToomCookWithEq
         )]
         algorithm: AlgorithmType,

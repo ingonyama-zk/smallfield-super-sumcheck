@@ -84,6 +84,27 @@ impl TowerField for BiniusTowerField {
             .collect() // Collect them into a vector
     }
 
+    // Generate a random BiniusTowerField with a non-zero value
+    // TODO: add rng as a param.
+    fn rand_non_zero(num_levels: Option<usize>) -> Self {
+        let mut rng = rand::thread_rng();
+        // Generate a non-zero random value
+        loop {
+            let val = rng.gen::<u128>();
+            let output = BiniusTowerField::new(val, num_levels);
+            if output.get_val() != 0u128 {
+                return output;
+            }
+        }
+    }
+
+    // New implementation for non-zero random vector generation
+    fn rand_vector_non_zero(size: usize, num_levels: Option<usize>) -> Vec<Self> {
+        (0..size)
+            .map(|_| BiniusTowerField::rand_non_zero(num_levels))
+            .collect()
+    }
+
     // Extend the number of levels in the tower
     fn extend_num_levels(&mut self, new_levels: usize) {
         assert!(self.num_levels <= new_levels);
@@ -448,6 +469,17 @@ mod tests {
         let mut rng = rand::thread_rng();
         let random_val = rng.gen::<u128>();
         BTF::new(random_val, Some(num_levels))
+    }
+
+    // Test non-zero random vector
+    #[test]
+    fn test_non_zero_random() {
+        for lvl in 0..8 {
+            let random_values = BTF::rand_vector_non_zero(1000, Some(lvl));
+            for r_val in random_values.iter() {
+                assert!(!r_val.is_zero());
+            }
+        }
     }
 
     #[test]
@@ -1601,6 +1633,31 @@ impl TowerField for OptimizedBiniusTowerField {
 
     fn rand_vector(size: usize, num_levels: Option<usize>) -> Vec<Self> {
         (0..size).map(|_| Self::rand(num_levels)).collect()
+    }
+
+    fn rand_non_zero(num_levels: Option<usize>) -> Self {
+        let mut rng = rand::thread_rng();
+        let level_num = num_levels.unwrap_or_else(|| rng.gen_range(0..=7));
+        let level = BiniusLevel::from_level(level_num).unwrap();
+        let num_bits = level.num_bits();
+
+        // Generate a non-zero random value
+        loop {
+            let val: u128 = if num_bits >= 128 {
+                rng.gen::<u128>()
+            } else {
+                let max_val = (1u128 << num_bits) - 1;
+                rng.gen_range(0..=max_val)
+            };
+            let output = Self::construct(val, Some(level_num));
+            if output.get_value_as_u128() != 0u128 {
+                return output;
+            }
+        }
+    }
+
+    fn rand_vector_non_zero(size: usize, num_levels: Option<usize>) -> Vec<Self> {
+        (0..size).map(|_| Self::rand_non_zero(num_levels)).collect()
     }
 
     fn extend_num_levels(&mut self, new_level_num: usize) {

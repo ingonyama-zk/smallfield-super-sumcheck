@@ -43,7 +43,7 @@ pub mod test_helpers {
             || algorithm == AlgorithmType::NaiveWithEq
             || algorithm == AlgorithmType::WitnessChallengeSeparationWithEq;
         let eq_challenges = if is_algo_with_eq_poly {
-            let eq_challenges = EF::rand_vector(nv, Some(num_levels));
+            let eq_challenges = EF::rand_vector_non_zero(nv, Some(7));
             let eq_challenges_evals = EqPoly::new(eq_challenges.clone()).compute_evals(false);
             polynomial_hadamard_ef
                 .iter_mut()
@@ -135,16 +135,14 @@ pub mod test_helpers {
 
     // Helper function to generate evaluation matrix for Toom-Cook algorithm.
     pub fn generate_evaluation_matrix<BF: TowerField>(degree: usize) -> Vec<Vec<BF>> {
+        debug_assert!(degree >= 1);
         let num_evals = degree + 1;
         let mut eval_matrix: Vec<Vec<BF>> = Vec::with_capacity(num_evals);
 
-        // Push first two rows for x = 0 and x = ∞
+        // Push first row for x = 0
         // x = 0 => [1 0 0 ... 0]
-        // x = ∞ => [0 0 0 ... 1]
         eval_matrix.push(vec![BF::zero(); num_evals]);
         eval_matrix[0][0] = BF::one();
-        // eval_matrix.push(vec![BF::zero(); num_evals]);
-        // eval_matrix[1][num_evals - 1] = BF::one();
 
         for i in 1..(num_evals - 1) {
             // Push a row for x = i
@@ -156,6 +154,9 @@ pub mod test_helpers {
                 eval_matrix.push(eval_row);
             }
         }
+
+        // Push last row for x = ∞
+        // x = ∞ => [0 0 0 ... 1]
         eval_matrix.push(vec![BF::zero(); num_evals]);
         eval_matrix[num_evals - 1][num_evals - 1] = BF::one();
         eval_matrix
