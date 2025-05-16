@@ -290,7 +290,7 @@ pub mod test_helpers {
     pub fn get_maps_from_matrix<FF: Field>(
         matrix: &Vec<Vec<i64>>,
         divisor: i64,
-    ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF>> {
+    ) -> Vec<Box<dyn Fn(&Vec<FF>) -> FF + Send + Sync>> {
         assert!(divisor > 0);
         let divisor_ff = FF::from(divisor.abs() as u32);
         let mut divisor_inv_ff = FF::ONE;
@@ -301,25 +301,26 @@ pub mod test_helpers {
             .iter()
             .map(|irow| {
                 let irow_cloned = irow.clone();
-                let imap: Box<dyn Fn(&Vec<FF>) -> FF> = Box::new(move |v: &Vec<FF>| -> FF {
-                    v.iter()
-                        .zip(irow_cloned.iter())
-                        .fold(FF::zero(), |acc, (value, scalar)| {
-                            let scalar_ff = FF::from((*scalar).abs() as u32);
-                            let mut scalar_by_divisor = scalar_ff;
-                            if divisor != 1 {
-                                scalar_by_divisor *= divisor_inv_ff;
-                            }
-                            if *scalar < 0 {
-                                acc - scalar_by_divisor * value
-                            } else {
-                                acc + scalar_by_divisor * value
-                            }
-                        })
-                });
+                let imap: Box<dyn Fn(&Vec<FF>) -> FF + Send + Sync> =
+                    Box::new(move |v: &Vec<FF>| -> FF {
+                        v.iter()
+                            .zip(irow_cloned.iter())
+                            .fold(FF::zero(), |acc, (value, scalar)| {
+                                let scalar_ff = FF::from((*scalar).abs() as u32);
+                                let mut scalar_by_divisor = scalar_ff;
+                                if divisor != 1 {
+                                    scalar_by_divisor *= divisor_inv_ff;
+                                }
+                                if *scalar < 0 {
+                                    acc - scalar_by_divisor * value
+                                } else {
+                                    acc + scalar_by_divisor * value
+                                }
+                            })
+                    });
                 imap
             })
-            .collect::<Vec<Box<dyn Fn(&Vec<FF>) -> FF>>>()
+            .collect::<Vec<Box<dyn Fn(&Vec<FF>) -> FF + Send + Sync>>>()
     }
 
     /// Setup all mappings etc for the toom-cook algorithm.
@@ -327,17 +328,18 @@ pub mod test_helpers {
         degree: usize,
         with_inversions: bool,
     ) -> (
-        Vec<Box<dyn Fn(&BF, &BF) -> BF>>,
+        Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>,
         Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>,
         Vec<usize>,
-        Vec<Box<dyn Fn(&Vec<BF>) -> BF>>,
-        Vec<Box<dyn Fn(&Vec<EF>) -> EF>>,
+        Vec<Box<dyn Fn(&Vec<BF>) -> BF + Send + Sync>>,
+        Vec<Box<dyn Fn(&Vec<EF>) -> EF + Send + Sync>>,
         i64,
     ) {
         // Define evaluation mappings
         // p(x) = p0 + p1.x
         let num_evals = degree + 1;
-        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF>> = Vec::with_capacity(num_evals);
+        let mut emaps_base: Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>> =
+            Vec::with_capacity(num_evals);
         emaps_base.push(Box::new(move |x: &BF, _y: &BF| -> BF { *x }));
         emaps_base.push(Box::new(move |_x: &BF, y: &BF| -> BF { *y }));
         for i in 1..=(num_evals / 2) {

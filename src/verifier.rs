@@ -210,12 +210,12 @@ fn batch_inversion_and_multiply<F: Field>(v: &mut [F], coeff: &F) {
 
 fn compute_barycentric_weight<F: Field>(i: usize, n: usize) -> F {
     let mut weight = F::one();
-    let f_i = F::new(i as u128, None);
+    let f_i = F::from(i as u128);
     for j in 0..n {
         if j == i {
             continue;
         } else {
-            let difference = f_i - F::new(j as u128, None);
+            let difference = f_i - F::from(j as u128);
             weight *= difference;
         }
     }
@@ -231,19 +231,22 @@ fn compute_barycentric_weight<F: Field>(i: usize, n: usize) -> F {
 ///
 pub(crate) fn barycentric_interpolation<F: Field>(evaluations: &[F], x: F) -> F {
     let num_points = evaluations.len();
-    if (x.get_val() as usize) < num_points {
-        return evaluations[x.get_val() as usize];
+    for i in 0..num_points {
+        let i_field = F::from(i as u128);
+        if x == i_field {
+            return evaluations[i];
+        }
     }
 
     // Calculate L(x) = product_{k=0}^{n-1} (x - k)
     let lagrange_evaluation = (0..num_points)
-        .map(|j| x - F::new(j as u128, None))
+        .map(|j| x - F::from(j as u128))
         .fold(F::one(), |mult, val| mult * val);
 
     // Calculate terms to be inverted: (x - j) * product_{k != j}(j - k)
     let mut terms_to_invert: Vec<F> = Vec::with_capacity(num_points);
     for j in 0..num_points {
-        let x_minus_j = x - F::new(j as u128, None);
+        let x_minus_j = x - F::from(j as u128);
         let weight_j = compute_barycentric_weight::<F>(j, num_points); // weight_j = product_{k != j}(j-k)
         terms_to_invert.push(x_minus_j * weight_j);
     }
@@ -259,6 +262,9 @@ pub(crate) fn barycentric_interpolation<F: Field>(evaluations: &[F], x: F) -> F 
         .fold(F::zero(), |acc, (&y_j, &inv_term_j)| {
             acc + (y_j * inv_term_j)
         });
+
+    interpolation_result * lagrange_evaluation
+}
 
 /// compute the factorial(a) = 1 * 2 * ... * a
 #[inline]
@@ -277,7 +283,7 @@ fn u64_factorial(a: usize) -> u64 {
 /// s(x) = s(inf) * product_{k=0}^{d-1}(x - k) + P_{0..d-1}(x)
 /// where P_{0..d-1}(x) is the unique polynomial of degree d-1 passing through (k, s(k)) for k=0..d-1.
 ///
-pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
+pub(crate) fn barycentric_interpolation_with_infinity<F: Field>(
     evaluations_at_0_to_d_minus_1: &[F],
     evaluation_at_infinity: F,
     x: F,
@@ -285,14 +291,17 @@ pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
     let d = evaluations_at_0_to_d_minus_1.len(); // This is the degree
 
     // Check if x is one of the finite evaluation points {0, ..., d-1}
-    if (x.get_val() as usize) < d {
-        return evaluations_at_0_to_d_minus_1[x.get_val() as usize];
+    for i in 0..d {
+        let i_field = F::from(i as u128);
+        if x == i_field {
+            return evaluations_at_0_to_d_minus_1[i];
+        }
     }
 
     // Calculate L(x) = product_{k=0}^{d-1} (x - k)
     let mut l_at_x = F::one();
     for k in 0..d {
-        l_at_x *= x - F::new(k as u128, None);
+        l_at_x *= x - F::from(k as u128);
     }
 
     // Calculate P_{0..d-1}(x) using standard barycentric interpolation for points {0..d-1}
@@ -306,8 +315,11 @@ pub(crate) fn barycentric_interpolation_with_infinity<F: TowerField>(
 
 #[cfg(test)]
 mod test {
+    use super::batch_inversion_and_multiply;
     use super::u64_factorial;
     use crate::verifier::barycentric_interpolation;
+    use ark_ff::One;
+    use ark_ff::Zero;
     use ark_poly::univariate::DensePolynomial;
     use ark_poly::DenseUVPolynomial;
     use ark_poly::Polynomial;
@@ -330,19 +342,19 @@ mod test {
 
         // test a polynomial with 20 known points, i.e., with degree 19
         let poly = DensePolynomial::<F>::rand(20 - 1, &mut prng);
-        let evals = (0..20)
+        let mut evals = (0..20)
             .map(|i| poly.evaluate(&F::from(i)))
             .collect::<Vec<F>>();
         let query = F::rand(&mut prng);
 
         // Create a random coefficient to multiply every element in the vector after inversion
-        let coeff = BF::rand(Some(2));
+        let coeff = F::rand(&mut prng);
 
         // Store the original vector for verification after batch inversion
-        let original_v = v.clone();
+        let original_v = evals.clone();
 
         // Perform the batch inversion and multiplication
-        batch_inversion_and_multiply(&mut v, &coeff);
+        batch_inversion_and_multiply(&mut evals, &coeff);
 
         // Check that each non-zero element in the original vector was correctly inverted
         for (i, elem) in original_v.iter().enumerate() {
@@ -350,7 +362,7 @@ mod test {
             if !elem.is_zero() {
                 // The product of the original element and its batch inverse (multiplied by the coefficient)
                 // should be equal to the coefficient
-                let inverted_elem = &v[i];
+                let inverted_elem = &evals[i];
 
                 // Check that elem * inverted_elem * coeff = coeff
                 let product = *elem * *inverted_elem;
@@ -364,16 +376,17 @@ mod test {
     #[test]
     fn test_barycentric_interpolation_random() {
         const NE: u32 = 100; // Number of elements
+        let mut prng = ark_std::test_rng();
 
         // Step 1: Sample a random coefficient vector
-        let coeffs: Vec<BF> = (0..NE).map(|_| BF::rand(Some(3))).collect();
+        let coeffs: Vec<F> = (0..NE).map(|_| F::rand(&mut prng)).collect();
 
         // Step 2: Compute its evaluation on [0, 1, ..., N-1]
-        let points: Vec<BF> = (0..NE).map(|j| BF::new(j as u128, Some(3))).collect();
-        let values: Vec<BF> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
+        let points: Vec<F> = (0..NE).map(|j| F::from(j as u128)).collect();
+        let values: Vec<F> = points.iter().map(|x| evaluate(&coeffs, x)).collect();
 
         // Step 3: Choose a random point in a large range
-        let x_rand = BF::rand(Some(6));
+        let x_rand = F::rand(&mut prng);
 
         // Step 4: Perform barycentric interpolation at the random point
         let barycentric_eval = barycentric_interpolation(&values, x_rand);
@@ -382,9 +395,17 @@ mod test {
         let original_eval = evaluate(&coeffs, &x_rand);
 
         // Step 6: Assert that the barycentric evaluation matches the original evaluation
-        assert_eq!(
-            poly.evaluate(&query),
-            barycentric_interpolation(&evals, query)
-        );
+        assert_eq!(original_eval, barycentric_eval);
+    }
+
+    // Helper function to evaluate a polynomial at a point x
+    fn evaluate(coeffs: &[F], x: &F) -> F {
+        let mut result = F::zero();
+        let mut power = F::one();
+        for coeff in coeffs {
+            result += *coeff * power;
+            power *= x;
+        }
+        result
     }
 }

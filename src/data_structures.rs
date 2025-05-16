@@ -1108,7 +1108,7 @@ impl<F: Field> MatrixPolynomial<F> {
     pub fn update_with_challenge<P>(
         &mut self,
         challenge: F,
-        interpolation_maps: &Vec<Box<dyn Fn(&Vec<F>) -> F>>,
+        interpolation_maps: &Vec<Box<dyn Fn(&Vec<F>) -> F + Send + Sync>>,
         mult_fn: &P,
     ) where
         P: Fn(&F, &F) -> F,
@@ -1909,13 +1909,13 @@ mod test {
         };
 
         // Simple map that chooses x[i + 2]
-        fn get_projective_imap(index: usize) -> Box<dyn Fn(&Vec<F>) -> F> {
+        fn get_projective_imap(index: usize) -> Box<dyn Fn(&Vec<F>) -> F + Send + Sync> {
             let col_size = 10;
             Box::new(move |x: &Vec<F>| -> F { x[(index + 2) % col_size].clone() })
         }
 
         // Simple permutation map
-        let interpolation_maps: Vec<Box<dyn Fn(&Vec<F>) -> F>> =
+        let interpolation_maps: Vec<Box<dyn Fn(&Vec<F>) -> F + Send + Sync>> =
             (0..col_size).map(|i| get_projective_imap(i)).collect();
 
         let r: F = random_field_element();
