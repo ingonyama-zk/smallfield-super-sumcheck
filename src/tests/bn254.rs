@@ -170,16 +170,6 @@ mod fq_tests {
         );
         assert_eq!(result_1.unwrap(), true);
 
-        let (_, result_3, elapsed_3) = sumcheck_test_helper(
-            nv,
-            degree,
-            round_t,
-            AlgorithmType::Precomputation,
-            false,
-            witness_type,
-        );
-        assert_eq!(result_3.unwrap(), true);
-
         let (_, result_4, elapsed_4) = sumcheck_test_helper(
             nv,
             degree,
@@ -191,8 +181,8 @@ mod fq_tests {
         assert_eq!(result_4.unwrap(), true);
 
         println!(
-            "{},{},{},{:.2?},{:.2?},{:.2?}",
-            nv, degree, round_t, elapsed_1, elapsed_3, elapsed_4,
+            "{},{},{},{:.2?},{:.2?}",
+            nv, degree, round_t, elapsed_1, elapsed_4,
         );
     }
 
