@@ -442,64 +442,294 @@ mod fq4_tests {
         println!("╚═════════════════╩════════════════════╩════════════════════╝");
     }
 
-    // Degree 2 tests
-    #[test]
-    fn benchmark_prover_n16_d2() {
-        helper_benchmark_prover(16, 2);
-    }
-    #[test]
-    fn benchmark_prover_n18_d2() {
-        helper_benchmark_prover(18, 2);
-    }
-    #[test]
-    fn benchmark_prover_n20_d2() {
-        helper_benchmark_prover(20, 2);
-    }
-    #[test]
-    fn benchmark_prover_n22_d2() {
-        helper_benchmark_prover(22, 2);
-    }
-    #[test]
-    fn benchmark_prover_n24_d2() {
-        helper_benchmark_prover(24, 2);
-    }
-    #[test]
-    fn benchmark_prover_n26_d2() {
-        helper_benchmark_prover(26, 2);
-    }
-    #[test]
-    fn benchmark_prover_n28_d2() {
-        helper_benchmark_prover(28, 2);
+    pub fn helper_benchmark_prover_algo(nv: usize, degree: usize, algo: AlgorithmType, name: &str) {
+        debug_assert!(degree == 2 || degree == 3);
+
+        println!("╔═══════════════════════════════════════════════════════════╗");
+        println!(
+            "║ Fixed Configurations: n = {}, degree = {},                 ║",
+            nv, degree
+        );
+        println!("╠═════════════════╦════════════════════╦════════════════════╣");
+        println!("║ Algorithm       ║ Runtime (s)        ║ Mem (MB)           ║");
+        println!("╠═════════════════╬════════════════════╬════════════════════╣");
+
+        // Choose round_t based on empirical results
+        let mut _round_t = 1;
+        if degree == 2 && algo == AlgorithmType::ToomCook {
+            _round_t = 4;
+        } else if degree == 2 && algo == AlgorithmType::ToomCookWithEq {
+            _round_t = 3;
+        } else if degree == 3 && algo == AlgorithmType::ToomCook {
+            _round_t = 3;
+        } else if degree == 3 && algo == AlgorithmType::ToomCookWithEq {
+            _round_t = 2;
+        }
+
+        let (_, result, time_s, mem_mb) =
+            sumcheck_test_helper(nv, degree, _round_t, algo.clone(), 1);
+
+        // Verify the result is correct
+        assert_eq!(
+            result.unwrap(),
+            true,
+            "Verification failed for algorithm {:?} with t={}",
+            algo,
+            _round_t
+        );
+
+        let mut algo_print_name = name.to_string();
+        if algo == AlgorithmType::ToomCook || algo == AlgorithmType::ToomCookWithEq {
+            algo_print_name = format!("{} (t={})", name, _round_t);
+        }
+
+        println!(
+            "║ {:<15} ║ {:>10.2} s       ║ {:>10.0} MB      ║",
+            algo_print_name, time_s, mem_mb
+        );
+        println!("╠═════════════════╬════════════════════╬════════════════════╣");
+
+        println!("╚═════════════════╩════════════════════╩════════════════════╝");
     }
 
-    // Degree 3 tests
+    // Degree 2 tests, algo1
     #[test]
-    fn benchmark_prover_n16_d3() {
-        helper_benchmark_prover(16, 3);
+    fn benchmark_prover_n16_d2_a1() {
+        helper_benchmark_prover_algo(16, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n18_d3() {
-        helper_benchmark_prover(18, 3);
+    fn benchmark_prover_n18_d2_a1() {
+        helper_benchmark_prover_algo(18, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n20_d3() {
-        helper_benchmark_prover(20, 3);
+    fn benchmark_prover_n20_d2_a1() {
+        helper_benchmark_prover_algo(20, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n22_d3() {
-        helper_benchmark_prover(22, 3);
+    fn benchmark_prover_n22_d2_a1() {
+        helper_benchmark_prover_algo(22, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n24_d3() {
-        helper_benchmark_prover(24, 3);
+    fn benchmark_prover_n24_d2_a1() {
+        helper_benchmark_prover_algo(24, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n26_d3() {
-        helper_benchmark_prover(26, 3);
+    fn benchmark_prover_n26_d2_a1() {
+        helper_benchmark_prover_algo(26, 2, AlgorithmType::Naive, "Algo1");
     }
     #[test]
-    fn benchmark_prover_n28_d3() {
-        helper_benchmark_prover(28, 3);
+    fn benchmark_prover_n28_d2_a1() {
+        helper_benchmark_prover_algo(28, 2, AlgorithmType::Naive, "Algo1");
+    }
+
+    // Degree 2 tests, algo4
+    #[test]
+    fn benchmark_prover_n16_d2_a4() {
+        helper_benchmark_prover_algo(16, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n18_d2_a4() {
+        helper_benchmark_prover_algo(18, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n20_d2_a4() {
+        helper_benchmark_prover_algo(20, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n22_d2_a4() {
+        helper_benchmark_prover_algo(22, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n24_d2_a4() {
+        helper_benchmark_prover_algo(24, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n26_d2_a4() {
+        helper_benchmark_prover_algo(26, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n28_d2_a4() {
+        helper_benchmark_prover_algo(28, 2, AlgorithmType::ToomCook, "Algo4");
+    }
+
+    // Degree 2 tests, algo1 with eq
+    #[test]
+    fn benchmark_prover_n16_d2_a1_eq() {
+        helper_benchmark_prover_algo(16, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n18_d2_a1_eq() {
+        helper_benchmark_prover_algo(18, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n20_d2_a1_eq() {
+        helper_benchmark_prover_algo(20, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n22_d2_a1_eq() {
+        helper_benchmark_prover_algo(22, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n24_d2_a1_eq() {
+        helper_benchmark_prover_algo(24, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n26_d2_a1_eq() {
+        helper_benchmark_prover_algo(26, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n28_d2_a1_eq() {
+        helper_benchmark_prover_algo(28, 2, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+
+    // Degree 2 tests, algo4 with eq
+    #[test]
+    fn benchmark_prover_n16_d2_a4_eq() {
+        helper_benchmark_prover_algo(16, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n18_d2_a4_eq() {
+        helper_benchmark_prover_algo(18, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n20_d2_a4_eq() {
+        helper_benchmark_prover_algo(20, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n22_d2_a4_eq() {
+        helper_benchmark_prover_algo(22, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n24_d2_a4_eq() {
+        helper_benchmark_prover_algo(24, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n26_d2_a4_eq() {
+        helper_benchmark_prover_algo(26, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n28_d2_a4_eq() {
+        helper_benchmark_prover_algo(28, 2, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+
+    // Degree 3 tests, algo1
+    #[test]
+    fn benchmark_prover_n16_d3_a1() {
+        helper_benchmark_prover_algo(16, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n18_d3_a1() {
+        helper_benchmark_prover_algo(18, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n20_d3_a1() {
+        helper_benchmark_prover_algo(20, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n22_d3_a1() {
+        helper_benchmark_prover_algo(22, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n24_d3_a1() {
+        helper_benchmark_prover_algo(24, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n26_d3_a1() {
+        helper_benchmark_prover_algo(26, 3, AlgorithmType::Naive, "Algo1");
+    }
+    #[test]
+    fn benchmark_prover_n28_d3_a1() {
+        helper_benchmark_prover_algo(28, 3, AlgorithmType::Naive, "Algo1");
+    }
+
+    // Degree 3 tests, algo4
+    #[test]
+    fn benchmark_prover_n16_d3_a4() {
+        helper_benchmark_prover_algo(16, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n18_d3_a4() {
+        helper_benchmark_prover_algo(18, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n20_d3_a4() {
+        helper_benchmark_prover_algo(20, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n22_d3_a4() {
+        helper_benchmark_prover_algo(22, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n24_d3_a4() {
+        helper_benchmark_prover_algo(24, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n26_d3_a4() {
+        helper_benchmark_prover_algo(26, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+    #[test]
+    fn benchmark_prover_n28_d3_a4() {
+        helper_benchmark_prover_algo(28, 3, AlgorithmType::ToomCook, "Algo4");
+    }
+
+    // Degree 3 tests, algo1 with eq
+    #[test]
+    fn benchmark_prover_n16_d3_a1_eq() {
+        helper_benchmark_prover_algo(16, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n18_d3_a1_eq() {
+        helper_benchmark_prover_algo(18, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n20_d3_a1_eq() {
+        helper_benchmark_prover_algo(20, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n22_d3_a1_eq() {
+        helper_benchmark_prover_algo(22, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n24_d3_a1_eq() {
+        helper_benchmark_prover_algo(24, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n26_d3_a1_eq() {
+        helper_benchmark_prover_algo(26, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+    #[test]
+    fn benchmark_prover_n28_d3_a1_eq() {
+        helper_benchmark_prover_algo(28, 3, AlgorithmType::NaiveWithEq, "Algo1Eq");
+    }
+
+    // Degree 3 tests, algo4 with eq
+    #[test]
+    fn benchmark_prover_n16_d3_a4_eq() {
+        helper_benchmark_prover_algo(16, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n18_d3_a4_eq() {
+        helper_benchmark_prover_algo(18, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n20_d3_a4_eq() {
+        helper_benchmark_prover_algo(20, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n22_d3_a4_eq() {
+        helper_benchmark_prover_algo(22, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n24_d3_a4_eq() {
+        helper_benchmark_prover_algo(24, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n26_d3_a4_eq() {
+        helper_benchmark_prover_algo(26, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
+    }
+    #[test]
+    fn benchmark_prover_n28_d3_a4_eq() {
+        helper_benchmark_prover_algo(28, 3, AlgorithmType::ToomCookWithEq, "Algo4Eq");
     }
 
     fn helper_benchmark_optimal_round_t(nv: usize, degree: usize) {
