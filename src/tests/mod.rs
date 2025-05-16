@@ -182,8 +182,8 @@ pub mod test_helpers {
 
         // Push last row for x = ∞
         // x = ∞ => [0 0 0 ... 1]
-        eval_matrix.push(vec![BF::zero(); num_evals]);
-        eval_matrix[num_evals - 1][num_evals - 1] = BF::one();
+        eval_matrix.push(vec![0; num_evals]);
+        eval_matrix[num_evals - 1][num_evals - 1] = 1;
         eval_matrix
     }
 

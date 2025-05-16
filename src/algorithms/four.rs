@@ -302,7 +302,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
                     // and we want these terms to be as "small" as possible.
                     scalar_matrix.update_with_challenge(
-                        BF::new(k as u128, Some(2)),
+                        BF::from(k as u128),
                         &interpolation_maps_bf,
                         &mult_bb_local,
                     );

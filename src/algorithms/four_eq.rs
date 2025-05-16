@@ -213,19 +213,28 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             // [.. p(1) ..] n
             // [.. p(2) ..] n
             // total = 2n bb mult
-            let mut cumulative_matrix_row_for_j =
-                MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[0], j, mappings)
-                    .evaluation_rows[0]
-                    .to_vec();
+            let mut cumulative_matrix_int_row_for_j = MatrixPolynomialInt::compute_merkle_roots(
+                &matrix_polynomials_int[0],
+                j,
+                mappings_int,
+            )
+            .evaluation_rows[0]
+                .to_vec();
 
             for i in 1..matrix_polynomials.len() {
-                let matrix_row_for_j =
-                    MatrixPolynomial::compute_merkle_roots(&matrix_polynomials[i], j, mappings)
-                        .evaluation_rows[0]
-                        .to_vec();
-                debug_assert_eq!(cumulative_matrix_row_for_j.len(), matrix_row_for_j.len());
+                let matrix_int_row_for_j = MatrixPolynomialInt::compute_merkle_roots(
+                    &matrix_polynomials_int[i],
+                    j,
+                    mappings_int,
+                )
+                .evaluation_rows[0]
+                    .to_vec();
                 debug_assert_eq!(
-                    cumulative_matrix_row_for_j.len(),
+                    cumulative_matrix_int_row_for_j.len(),
+                    matrix_int_row_for_j.len()
+                );
+                debug_assert_eq!(
+                    cumulative_matrix_int_row_for_j.len(),
                     1 << (prover_state.num_vars - round_small_val)
                 );
                 cumulative_matrix_int_row_for_j
@@ -499,7 +508,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
                     // This matters because the size of k will affect the multiplication with the scalar terms (1 - k) and (k)
                     // and we want these terms to be as "small" as possible.
                     scalar_matrix.update_with_challenge(
-                        BF::new(k as u128, Some(2)),
+                        BF::from(k as u128),
                         &interpolation_maps_bf,
                         &mult_bb_local,
                     );
@@ -519,12 +528,12 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
                     // For k = 2, 3, ..., d - 1, eq1 center evaluation is:
                     // (1 - k)(1 - e) + ke = 2ke - k - e + 1
-                    let k_val = BF::new(k as u128, Some(3));
+                    let k_val = BF::from(k as u128);
                     let eq_challenge_value = eq_challenges[round_num - 1];
                     let k_times_eq_challenge_value = mult_be(&k_val, &eq_challenge_value);
                     let eq_1_center_evaluation = k_times_eq_challenge_value
                         + k_times_eq_challenge_value
-                        - EF::new(k as u128, None)
+                        - EF::from(k as u128)
                         - eq_challenge_value
                         + EF::one();
                     eq_1_center_evaluations[k as usize - 1] = eq_1_center_evaluation;
@@ -578,14 +587,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
             let intermediate_round_poly_final_eval = barycentric_interpolation_with_infinity(
                 &intermediate_round_poly,
                 intermediate_round_poly_evaluation_at_infty,
-                EF::new(num_witness_polys as u128, Some(2)),
+                EF::from(num_witness_polys as u128),
             );
 
             // Compute the eq1 centre evaluation at k = d: (1 - k)(1 - e) + ke
-            let final_k_val = BF::new(num_witness_polys as u128, Some(2));
+            let final_k_val = BF::from(num_witness_polys as u128);
             let k_times_eq_challenge_value = mult_be(&final_k_val, &eq_challenge_value);
             let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
-                - EF::new(num_witness_polys as u128, None)
+                - EF::from(num_witness_polys as u128)
                 - eq_challenge_value
                 + EF::one();
 

@@ -9,10 +9,8 @@ use merlin::Transcript;
 use crate::data_structures::LinearLagrangeList;
 use crate::extension_transcript::ExtensionTranscriptProtocol;
 use crate::prover::ProverState;
+use crate::verifier::barycentric_interpolation_with_infinity;
 use crate::IPForMLSumcheck;
-use crate::{
-    btf_transcript::TFTranscriptProtocol, verifier::barycentric_interpolation_with_infinity,
-};
 use rayon::prelude::*;
 
 impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
@@ -206,14 +204,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         let intermediate_round_poly_final_eval = barycentric_interpolation_with_infinity(
             &intermediate_round_poly,
             intermediate_round_poly_evaluation_at_infty,
-            EF::new(num_witness_polys as u128, Some(2)),
+            EF::from(num_witness_polys as u128),
         );
 
         // Compute the eq1 center evaluation at k = d: (1 - k)(1 - e) + ke
-        let final_k_val = EF::new(num_witness_polys as u128, Some(3));
+        let final_k_val = EF::from(num_witness_polys as u128);
         let k_times_eq_challenge_value = final_k_val * *eq_challenge_value;
         let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
-            - EF::new(num_witness_polys as u128, None)
+            - EF::from(num_witness_polys as u128)
             - *eq_challenge_value
             + EF::one();
 
@@ -312,7 +310,7 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
     ) -> (EF, EF)
     where
         C: Fn(&Vec<F>) -> EF + Sync,
-        F: TowerField + Sync,
+        F: Field + Sync,
         EF: Send + Sync,
     {
         // Degree 0 polynomial doesn't make sense for combine_function.
@@ -424,10 +422,10 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
 
             // eq1 center evaluation is:
             // (1 - k)(1 - e) + ke = 2ke - k - e + 1
-            let k_val = EF::new(k as u128, Some(3));
+            let k_val = EF::from(k as u128);
             let k_times_eq_challenge_value = k_val * *eq_1_center_challenge;
             let eq_1_center_evaluation = k_times_eq_challenge_value + k_times_eq_challenge_value
-                - EF::new(k as u128, None)
+                - EF::from(k as u128)
                 - *eq_1_center_challenge
                 + EF::one();
 
@@ -447,14 +445,14 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         );
 
         // append the round polynomial (i.e. prover message) to the transcript
-        <Transcript as TFTranscriptProtocol<EF, BF>>::append_scalars(
+        <Transcript as ExtensionTranscriptProtocol<EF, BF>>::append_scalars(
             transcript,
             b"r_poly",
             &round_polynomials[round_number - 1], // (d + 1) evaluations
         );
 
         // generate challenge α_i = H( transcript );
-        let alpha: EF = <Transcript as TFTranscriptProtocol<EF, BF>>::challenge_scalar(
+        let alpha: EF = <Transcript as ExtensionTranscriptProtocol<EF, BF>>::challenge_scalar(
             transcript,
             b"challenge_nextround",
         );
