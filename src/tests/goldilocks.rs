@@ -122,12 +122,13 @@ mod fq2_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
-            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::from(scaled_det)),
+            Some(claimed_sum),
         );
 
         let mut round_t_v = round_t;

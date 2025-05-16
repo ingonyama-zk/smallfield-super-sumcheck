@@ -163,6 +163,11 @@ pub mod test_helpers {
         eval_matrix.push(vec![0; num_evals]);
         eval_matrix[0][0] = 1;
 
+        // Push second row for x = 1
+        // x = 1 => [0 0 0 ... 1]
+        eval_matrix.push(vec![0; num_evals]);
+        eval_matrix[1][num_evals - 1] = 1;
+
         for i in 1..=(num_evals / 2) {
             // Push a row for x = i
             // x = i => [1 i i² i³ ... iᵈ⁺¹]
@@ -179,11 +184,6 @@ pub mod test_helpers {
                 eval_matrix.push(eval_row);
             }
         }
-
-        // Push last row for x = ∞
-        // x = ∞ => [0 0 0 ... 1]
-        eval_matrix.push(vec![0; num_evals]);
-        eval_matrix[num_evals - 1][num_evals - 1] = 1;
         eval_matrix
     }
 

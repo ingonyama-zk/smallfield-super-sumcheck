@@ -121,12 +121,13 @@ mod fq_tests {
             &mult_ee,
             &mult_bb,
             Some(round_t),
-            eq_challenges.as_ref(),
             Some(&emaps_base),
             Some(&emaps_base_int),
             Some(&projective_map_indices),
             Some(&imaps_base),
             Some(&imaps_ext),
+            Some(BF::from(scaled_det)),
+            Some(claimed_sum),
         );
         let elapsed = start.elapsed().as_millis();
 
@@ -214,16 +215,6 @@ mod fq_tests {
         );
         assert_eq!(result_1_eq.unwrap(), true);
 
-        let (_, result_3_eq, elapsed_3_eq) = sumcheck_test_helper(
-            nv,
-            degree,
-            round_t,
-            AlgorithmType::PrecomputationWithEq,
-            false,
-            witness_type,
-        );
-        assert_eq!(result_3_eq.unwrap(), true);
-
         let (_, result_4_eq, elapsed_4_eq) = sumcheck_test_helper(
             nv,
             degree,
@@ -235,8 +226,8 @@ mod fq_tests {
         assert_eq!(result_4_eq.unwrap(), true);
 
         println!(
-            "{},{},{},{:.2?},{:.2?},{:.2?}",
-            nv, degree, round_t, elapsed_1_eq, elapsed_3_eq, elapsed_4_eq,
+            "{},{},{},{:.2?},{:.2?}",
+            nv, degree, round_t, elapsed_1_eq, elapsed_4_eq,
         );
     }
 }

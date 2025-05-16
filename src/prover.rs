@@ -142,7 +142,6 @@ impl<EF: Field, BF: PrimeField> IPForMLSumcheck<EF, BF> {
         mult_ee: &EE,
         mult_bb: &BB,
         round_small_val: Option<usize>,
-        eq_challenges: Option<&Vec<EF>>,
         mappings: Option<&Vec<Box<dyn Fn(&BF, &BF) -> BF + Send + Sync>>>,
         mappings_int: Option<&Vec<Box<dyn Fn(&i64, &i64) -> i64 + Send + Sync>>>,
         projection_mapping_indices: Option<&Vec<usize>>,

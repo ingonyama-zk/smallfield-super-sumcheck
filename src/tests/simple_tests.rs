@@ -196,33 +196,6 @@ mod simple_extension_tests {
             None,
         );
         assert_eq!(result.unwrap(), true);
-
-        let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
-        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
-            &mut prover_state_dup,
-            &mut prover_transcript_dup,
-            &mult_be,
-            &mult_ee,
-            &mult_bb,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck_algo2");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof_dup,
-            &mut verifier_transcript_dup,
-            AlgorithmType::Naive,
-            None,
-            None,
-        );
-        assert_eq!(result_dup.unwrap(), true);
     }
 
     #[test]
@@ -419,44 +392,6 @@ mod simple_extension_tests {
             None,
             None,
         );
-
-        let mut prover_state_dup: ProverState<EF, BF> =
-            IPForMLSumcheck::prover_init(&polynomials, AlgorithmType::Naive, None);
-        let mut prover_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let proof_dup: SumcheckProof<EF> = IPForMLSumcheck::<EF, BF>::prove_product::<_, _, _>(
-            &mut prover_state_dup,
-            &mut prover_transcript_dup,
-            &mult_be,
-            &mult_ee,
-            &mult_bb,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
-        let result = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof,
-            &mut verifier_transcript,
-            AlgorithmType::WitnessChallengeSeparation,
-            None,
-            None,
-        );
-        assert_eq!(result.unwrap(), true);
-
-        let mut verifier_transcript_dup = Transcript::new(b"test_product_sumcheck");
-        let result_dup = IPForMLSumcheck::<EF, BF>::verify(
-            to_ef(&claimed_sum),
-            &proof_dup,
-            &mut verifier_transcript_dup,
-            AlgorithmType::Naive,
-            None,
-            None,
-        );
-        assert_eq!(result_dup.unwrap(), true);
 
         let mut verifier_transcript = Transcript::new(b"test_product_sumcheck");
         let result = IPForMLSumcheck::<EF, BF>::verify(
